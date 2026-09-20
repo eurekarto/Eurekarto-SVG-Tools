@@ -1,4 +1,4 @@
-# Eurekarto SVG Tools — 1.3.1
+# Eurekarto SVG Tools — 1.4.0
 
 © 2026 Blanche Lambert / Eurêkarto  
 Créé par Blanche Lambert pour Eurêkarto en 2026.  
@@ -8,9 +8,9 @@ Code source et signalement de bugs : https://github.com/eurekarto/Eurekarto-SVG-
 
 ## Installation
 
-**Français** — Dans QGIS 3.40 LTR ou QGIS 4 : **Extensions → Installer/Gérer les extensions → Installer depuis un ZIP**. Sélectionnez `eurekarto_svg_tools-1_3_1.zip`, puis activez l'extension. L'outil apparaît dans le menu **Extensions → Eurekarto SVG Tools**, dans la barre d'outils des extensions, et dans la **boîte à outils de traitements**, fournisseur *Eurekarto SVG Tools*, groupe *Cartographie pour DAO*. Aucun paquet Python supplémentaire n'est nécessaire.
+**Français** — Dans QGIS 3.40 LTR ou QGIS 4 : **Extensions → Installer/Gérer les extensions → Installer depuis un ZIP**. Sélectionnez `eurekarto_svg_tools-1_4_0.zip`, puis activez l'extension. L'outil apparaît dans le menu **Extensions → Eurekarto SVG Tools**, dans la barre d'outils des extensions, et dans la **boîte à outils de traitements**, fournisseur *Eurekarto SVG Tools*, groupe *Cartographie pour DAO*. Aucun paquet Python supplémentaire n'est nécessaire.
 
-**English** — In QGIS 3.40 LTR or QGIS 4, use **Plugins → Manage and Install Plugins → Install from ZIP**, select `eurekarto_svg_tools-1_3_1.zip`, then enable the plugin. The tool appears under **Plugins → Eurekarto SVG Tools**, in the plugins toolbar, and in the **Processing toolbox**, provider *Eurekarto SVG Tools*, group *Cartography for CAD*. No additional Python packages are required.
+**English** — In QGIS 3.40 LTR or QGIS 4, use **Plugins → Manage and Install Plugins → Install from ZIP**, select `eurekarto_svg_tools-1_4_0.zip`, then enable the plugin. The tool appears under **Plugins → Eurekarto SVG Tools**, in the plugins toolbar, and in the **Processing toolbox**, provider *Eurekarto SVG Tools*, group *Cartography for CAD*. No additional Python packages are required.
 
 Le ZIP contient exactement un dossier racine, `eurekarto_svg_tools`. Pour une installation manuelle, copiez ce dossier dans le répertoire `python/plugins` du profil QGIS actif et redémarrez QGIS. L'interface suit la langue de QGIS : française si QGIS est en français, anglaise sinon.
 
@@ -65,11 +65,15 @@ Les distances sont mesurées **le long des parallèles**, à la longitude du cen
 
 ## Tracés trop denses pour Illustrator
 
-Illustrator n'ouvre pas un tracé de plus de 10 000 sommets environ : la forme disparaît silencieusement. Le paramètre **Nombre maximal de sommets par forme** (10 000 par défaut) détecte le cas après découpage et fusion, puis simplifie la géométrie par Douglas-Peucker avec une tolérance exprimée en millimètres sur la page, en partant de 0,01 mm et en doublant jusqu'à passer sous la limite. La tolérance retenue est indiquée dans le journal ; à 0,01 mm la perte est inférieure à la précision d'impression. Le comptage porte sur le tracé réellement écrit : total de l'entité en tracé composé, sommet le plus lourd de chaque partie si l'option de séparation des îles est active — activer cette option est d'ailleurs l'autre façon de passer sous la limite sans rien simplifier. Mettez 0 pour désactiver la réduction.
+Illustrator n'ouvre pas un tracé de plus de 10 000 sommets environ : la forme disparaît silencieusement. Le paramètre **Nombre maximal de sommets par forme** (10 000 par défaut) traite ce cas, mais jamais au prix de la forme.
+
+Trois garde-fous. La simplification s'applique **partie par partie** : un continent dense ne coûte plus ses sommets à une petite île de la même entité. La tolérance Douglas-Peucker est **plafonnée** par *Simplification maximale autorisée*, 0,1 mm sur la page par défaut — en dessous de la précision d'impression. Et si aucune tolérance autorisée ne suffit, la forme est **découpée en dalles** qui pavent exactement la même surface : aucun sommet n'est perdu, et chaque tracé écrit reste sous la limite. Les dalles ne portent pas de contour, pour que leurs bords ne se voient jamais ; le contour d'origine est dessiné à part, en polylignes ouvertes qui se chevauchent d'un point pour rester continues.
+
+Les parties ne sont fusionnées en un tracé composé que si le résultat tient sous la limite ; sinon elles restent des tracés distincts, ce qui préserve tous les sommets. Cocher *Séparer les îles en tracés distincts* force ce comportement. Mettez 0 pour désactiver entièrement la réduction.
 
 ## Limites connues
 
-- Seul le premier niveau de chaque symbole est lu : hachures, dégradés, contours multiples et formes de marqueurs ressortent en aplats et traits simples, avec la bonne couleur.
+- Tous les niveaux d'un symbole sont lus, et leur type est distingué : un polygone dont le contour est un niveau de ligne garde ce contour au lieu d'être rempli de sa couleur, et une ligne conserve la sienne. En revanche le rendu reste un aplat et un trait : hachures, dégradés et formes de marqueurs ressortent simplifiés, avec la bonne couleur.
 - Une entité qu'aucune classe ne couvre n'est pas exportée, comme sur la carte ; le journal la compte sous « non dessinées par la symbologie ».
 - Un pays dont les entités relèvent de deux classes apparaît une fois dans chaque classe.
 - Les identifiants XML sont repliés en ASCII et rendus uniques ; le nom d'origine reste dans `data-name` et dans `<title>`.
@@ -85,6 +89,7 @@ Le journal d'exécution indique les valeurs de calage lues, le nombre de classes
 
 ## Historique
 
+- **1.4.0** — La simplification ne déforme plus : elle travaille partie par partie et sa tolérance est plafonnée. Une forme qu'aucune tolérance autorisée ne peut alléger est écrite telle quelle et signalée. Illustrator tronque un tracé trop dense au lieu de le refuser, d'où ce découpage. Chaque polygone rendu par une réparation est écrit, y compris lorsque l'allègement d'un anneau l'a rendu auto-intersectant. Le remplissage suit la règle `nonzero` avec des anneaux orientés explicitement : les trous percent, et deux contours qui se recouvrent s'additionnent au lieu de s'annuler en un trou blanc.
 - **1.3.1** — Plus aucune erreur avalée en silence : une emprise sans image dans le SCR de la couche retire le filtre spatial au lieu de ne rien lire, et un rendu qui refuse d'être libéré est signalé. Passe le contrôle de sécurité Bandit du dépôt QGIS.
 - **1.3.0** — Les latitudes absentes de la carte ne reçoivent plus de barre.
 - **1.2.0** — Paramètres regroupés par section dans la fenêtre, réglages fins basculés en avancés, nom de la projection écrit sous la barre d'échelle.
@@ -96,9 +101,9 @@ Le journal d'exécution indique les valeurs de calage lues, le nombre de classes
 
 ## Vérifications effectuées
 
-- **Tests unitaires** : 49 tests couvrant le calage (y compris cadre pivoté), l'écriture des tracés, les identifiants XML, la réduction des sommets, la surface minimale, les clés de regroupement, la lecture des styles, la formule de la barre d'échelle contrôlée contre les longueurs géodésiques publiées, et la bonne formation du document SVG. Ils s'exécutent hors QGIS, sur des doublures minimales : `python3 test_svg_export.py`.
+- **Tests unitaires** : 54 tests, dont onze sur la lecture des symboles couvrant le calage (y compris cadre pivoté), l'écriture des tracés, les identifiants XML, la réduction des sommets, la surface minimale, les clés de regroupement, la lecture des styles, la formule de la barre d'échelle contrôlée contre les longueurs géodésiques publiées, et la bonne formation du document SVG. Ils s'exécutent hors QGIS, sur des doublures minimales : `python3 test_svg_export.py`.
 - **Analyse statique** : `pyflakes`, `flake8` (lignes ≤ 100 caractères, complexité ≤ 12) et `bandit` — l'analyseur de sécurité utilisé par le dépôt QGIS — ne signalent rien.
-- **Traductions** : 93 chaînes, générées depuis les appels `tr()` réellement présents dans le code, compilées avec `lrelease` et chargement vérifié ; aucune chaîne manquante ni orpheline, champs de substitution cohérents entre les deux langues.
+- **Traductions** : 95 chaînes, générées depuis les appels `tr()` réellement présents dans le code, compilées avec `lrelease` et chargement vérifié ; aucune chaîne manquante ni orpheline, champs de substitution cohérents entre les deux langues.
 - **Non vérifié** : l'exécution réelle dans QGIS — renderers, itération sur les entités, rendu raster, compatibilité QGIS 4. À valider sur un projet réel avant diffusion.
 
 ## Publication sur plugins.qgis.org

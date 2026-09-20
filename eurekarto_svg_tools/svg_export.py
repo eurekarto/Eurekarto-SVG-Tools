@@ -53,6 +53,9 @@ PARAMETER_DOUBLE = _enum(QgsProcessingParameterNumber, 'Type', 'Double')
 NO_GEOMETRY_CHECK = _enum(QgsFeatureRequest, 'InvalidGeometryCheck', 'GeometryNoCheck')
 REVERSE_TRANSFORM = _enum(QgsCoordinateTransform, 'TransformDirection', 'ReverseTransform')
 TRANSFORM_SUCCESS = _enum(Qgis, 'GeometryOperationResult', 'Success')
+SYMBOL_FILL = _enum(Qgis, 'SymbolType', 'Fill')
+SYMBOL_LINE = _enum(Qgis, 'SymbolType', 'Line')
+SYMBOL_MARKER = _enum(Qgis, 'SymbolType', 'Marker')
 NO_PEN = _enum(Qt, 'PenStyle', 'NoPen')
 NO_BRUSH = _enum(Qt, 'BrushStyle', 'NoBrush')
 WRITE_ONLY = _enum(QIODevice, 'OpenModeFlag', 'WriteOnly')
@@ -66,9 +69,14 @@ PLACEHOLDER_IDS = frozenset({'-99', '-999', 'N/A', '#N/A', 'NULL', 'NONE', 'UNKN
 # Largest image accepted, so a high DPI on a large page cannot exhaust memory.
 MAXIMUM_PIXELS = 60000000
 # Douglas-Peucker tolerances tried when a shape holds more vertices than the
-# limit: 0.01 mm on the page, doubled up to roughly 80 mm.
+# limit, in millimetres on the page. The ladder stops at the cap: beyond a few
+# hundredths of a millimetre the simplification starts to show, and a visibly
+# wrong coastline is worse than a path Illustrator may refuse to open.
 FIRST_TOLERANCE = 0.01
-TOLERANCE_STEPS = 14
+DEFAULT_MAXIMUM_TOLERANCE = 0.1
+# A shape no allowed tolerance can thin is cut into tiles that pave the same
+# surface. Bounds on how many, so a pathological shape cannot explode the file.
+MINIMUM_TILES, MAXIMUM_TILES = 2, 32
 
 Options = namedtuple('Options', 'use_style clip raster_dpi default_radius')
 ScaleOptions = namedtuple(
@@ -136,12 +144,14 @@ class FrameWriter:
     rotation is carried without any trigonometry here.
     """
 
-    def __init__(self, corners, size, crs, precision, split_parts, min_area, max_vertices):
+    def __init__(self, corners, size, crs, precision, split_parts, min_area, max_vertices,
+                 max_tolerance=DEFAULT_MAXIMUM_TOLERANCE):
         self.crs = crs
         self.precision = precision
         self.split_parts = split_parts
         self.min_area = min_area
         self.max_vertices = max_vertices
+        self.max_tolerance = max_tolerance
         self.width, self.height = size
         top_left = (corners[0].x(), corners[0].y())
         top_right = (corners[1].x(), corners[1].y())
@@ -172,14 +182,37 @@ class FrameWriter:
                 (self.ux * dy - self.uy * dx) / self.determinant)
 
     @staticmethod
-    def ring_area(points):
-        """Ring area in square millimetres, points already in frame coordinates."""
+    def signed_ring_area(points):
+        """Ring area in square millimetres, negative when the ring winds the other way."""
         total = 0.0
         for index in range(len(points)):
             x1, y1 = points[index]
             x2, y2 = points[(index + 1) % len(points)]
             total += x1 * y2 - x2 * y1
-        return abs(total) / 2.0
+        return total / 2.0
+
+    @classmethod
+    def ring_area(cls, points):
+        """Ring area in square millimetres, points already in frame coordinates."""
+        return abs(cls.signed_ring_area(points))
+
+    @classmethod
+    def oriented(cls, rings):
+        """Rings wound so that holes cut and separate outlines add up.
+
+        With fill-rule nonzero, a hole only cuts when it winds against its
+        exterior, and two exteriors that overlap add up instead of cancelling
+        each other — which is what repairing a self-intersecting ring produces.
+        """
+        if not rings:
+            return rings
+        exterior = rings[0]
+        outward = cls.signed_ring_area(exterior) >= 0
+        placed = [exterior if outward else exterior[::-1]]
+        for hole in rings[1:]:
+            inward = cls.signed_ring_area(hole) < 0
+            placed.append(hole if inward else hole[::-1])
+        return placed
 
     def path(self, points, closed):
         commands = []
@@ -208,42 +241,144 @@ class FrameWriter:
             return 0
 
     def reduce_vertices(self, geometry, geometry_type, stats):
-        """Illustrator drops very dense paths: simplify until under the limit."""
+        """Thin one shape until it is under the limit, or leave it untouched.
+
+        The tolerance never passes max_tolerance: past that the simplification
+        would be visible, and a dense path that Illustrator may refuse is a
+        better outcome than a coastline cut into straight chords.
+        """
         if not self.max_vertices or geometry_type == GEOMETRY_POINT:
             return geometry
         if self.vertex_count(geometry) <= self.max_vertices:
             return geometry
-        tolerance, best = FIRST_TOLERANCE, None
-        for _ in range(TOLERANCE_STEPS):
+        tolerance = FIRST_TOLERANCE
+        while tolerance <= self.max_tolerance * (1.0 + 1e-9):
             candidate = keep_type(geometry.simplify(tolerance * self.unit_mm), geometry_type)
             if candidate is not None and not candidate.isGeosValid():
                 candidate = keep_type(candidate.makeValid(), geometry_type)
-            if candidate is not None:
-                best = candidate
-                if self.vertex_count(candidate) <= self.max_vertices:
-                    stats['simplified'] += 1
-                    stats['tolerance'] = max(stats['tolerance'], tolerance)
-                    return candidate
+            if candidate is not None and self.vertex_count(candidate) <= self.max_vertices:
+                stats['simplified'] += 1
+                stats['tolerance'] = max(stats['tolerance'], tolerance)
+                return candidate
             tolerance *= 2
-        # Still too dense: the closest attempt is better than a shape Illustrator
-        # will not open at all.
         stats['over'] += 1
-        return best if best is not None else geometry
+        return geometry
 
-    def polygon_pieces(self, geometry):
-        pieces, small = [], 0
-        for polygon in geometry.asMultiPolygon():
-            rings = [[self.to_frame(point) for point in ring] for ring in polygon]
-            if not rings or self.ring_area(rings[0]) < self.min_area:
-                small += 1
+    @staticmethod
+    def parts_of(geometry):
+        """The geometry's parts, one by one; a single-part geometry yields itself."""
+        return geometry.asGeometryCollection() if geometry.isMultipart() else [geometry]
+
+    @staticmethod
+    def rings_of(part):
+        """The rings of one single polygon: its exterior first, then its holes."""
+        return part.asPolygon()
+
+    def tiles_of(self, part, count):
+        """The part cut into tiles, each holding a fraction of its vertices.
+
+        Splitting keeps every vertex, where thinning would lose some: the tiles
+        pave exactly the same surface.
+        """
+        side = int(math.ceil(math.sqrt(count / float(self.max_vertices))))
+        side = max(MINIMUM_TILES, min(side + 1, MAXIMUM_TILES))
+        box = part.boundingBox()
+        width, height = box.width() / side, box.height() / side
+        tiles = []
+        for column in range(side):
+            for row in range(side):
+                left = box.xMinimum() + column * width
+                bottom = box.yMinimum() + row * height
+                rectangle = QgsRectangle(left, bottom, left + width, bottom + height)
+                piece = keep_type(part.intersection(QgsGeometry.fromRect(rectangle)),
+                                  GEOMETRY_POLYGON)
+                if piece is not None:
+                    tiles.append(piece)
+        return tiles or [part]
+
+    @staticmethod
+    def chunks(points, size):
+        """Consecutive runs of at most size points, each repeating the previous last.
+
+        The repeat keeps the drawn line continuous across two paths.
+        """
+        if len(points) <= size:
+            return [points]
+        runs, start = [], 0
+        while start < len(points) - 1:
+            runs.append(points[start:start + size])
+            start += size - 1
+        return runs
+
+    def outline_pieces(self, rings):
+        """The rings as open polylines, short enough to survive an import."""
+        pieces = []
+        for ring in rings:
+            closed = ring + [ring[0]] if ring and ring[0] != ring[-1] else ring
+            for run in self.chunks(closed, self.max_vertices):
+                drawn = self.path(run, False)
+                if drawn:
+                    pieces.append('<path fill="none" d="{0}"/>'.format(drawn))
+        return pieces
+
+    def dense_pieces(self, part, stats, stroke):
+        """A shape too dense for one path: tiled fills, and its outline apart.
+
+        The tiles carry no stroke, so the cuts between them never show; the
+        original outline is drawn separately as open polylines.
+        """
+        stats['tiled'] += 1
+        pieces, rings = [], []
+        for tile in self.tiles_of(part, self.vertex_count(part)):
+            for single in self.parts_of(tile):
+                drawn = [one for one in
+                         (self.path(ring, True) for ring in self.oriented(
+                             [[self.to_frame(point) for point in ring]
+                              for ring in self.rings_of(single)])) if one]
+                if drawn:
+                    pieces.append('<path stroke="none" d="{0}"/>'.format(''.join(drawn)))
+        if stroke:
+            rings = [[self.to_frame(point) for point in ring]
+                     for ring in self.rings_of(part)]
+            pieces.extend(self.outline_pieces(rings))
+        return pieces
+
+    def polygon_pieces(self, geometry, stats, stroke=True):
+        """Path data per polygon part, each thinned on its own account.
+
+        Parts are handled separately so that a dense mainland never costs an
+        island its shape, and they are merged into one compound path only when
+        the result still fits under the vertex limit. A part that no allowed
+        tolerance can thin is tiled instead, which keeps every vertex.
+        """
+        drawn_parts, small, extra = [], 0, []
+        for part in self.parts_of(geometry):
+            before = stats['over']
+            thinned = self.reduce_vertices(part, GEOMETRY_POLYGON, stats)
+            if stats['over'] > before and self.max_vertices:
+                extra.extend(self.dense_pieces(thinned, stats, stroke))
                 continue
-            drawn = [one for one in (self.path(ring, True) for ring in rings) if one]
-            if drawn:
-                pieces.append('<path d="{0}"/>'.format(''.join(drawn)))
-        if not self.split_parts and len(pieces) > 1:
-            merged = ''.join(re.findall(r'd="([^"]*)"', ''.join(pieces)))
-            pieces = ['<path d="{0}"/>'.format(merged)]
-        return pieces, small
+            # Thinning can hand back several polygons: simplifying a ring may make
+            # it self-intersect, and the repair then splits it in two.
+            for single in self.parts_of(thinned):
+                rings = [[self.to_frame(point) for point in ring]
+                         for ring in self.rings_of(single)]
+                if not rings or self.ring_area(rings[0]) < self.min_area:
+                    small += 1
+                    continue
+                rings = self.oriented(rings)
+                drawn = [one for one in (self.path(ring, True) for ring in rings) if one]
+                if drawn:
+                    drawn_parts.append(''.join(drawn))
+        if not self.split_parts and len(drawn_parts) > 1:
+            merged = ''.join(drawn_parts)
+            if not self.max_vertices or merged.count(',') <= self.max_vertices:
+                drawn_parts = [merged]
+            else:
+                # Merging would push the compound path over the limit: the parts
+                # stay separate rather than lose vertices to fit.
+                stats['separated'] += 1
+        return ['<path d="{0}"/>'.format(one) for one in drawn_parts] + extra, small
 
     def line_pieces(self, geometry):
         pieces = []
@@ -261,12 +396,12 @@ class FrameWriter:
                 number(x, self.precision), number(y, self.precision), number(radius, 3)))
         return pieces
 
-    def pieces(self, geometry, geometry_type, radius, stats):
+    def pieces(self, geometry, geometry_type, radius, stats, stroke=True):
         """SVG elements for one geometry, plus the parts below the minimum area."""
+        if geometry_type == GEOMETRY_POLYGON:
+            return self.polygon_pieces(geometry, stats, stroke)
         geometry = self.reduce_vertices(geometry, geometry_type, stats)
         geometry.convertToMultiType()
-        if geometry_type == GEOMETRY_POLYGON:
-            return self.polygon_pieces(geometry)
         if geometry_type == GEOMETRY_LINE:
             return self.line_pieces(geometry), 0
         return self.point_pieces(geometry, radius), 0
@@ -309,6 +444,7 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
     SCALE_FONT = 'SCALE_FONT'
     SCALE_PROJECTION = 'SCALE_PROJECTION'
     SCALE_VISIBLE = 'SCALE_VISIBLE'
+    MAX_TOLERANCE = 'MAX_TOLERANCE'
     OUTPUT = 'OUTPUT'
 
     def name(self):
@@ -345,10 +481,11 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
             '<p><b>Colours.</b> Fills, outlines and widths are read from the layer '
             'symbology, and each class of a categorized or graduated layer becomes '
             'its own group named after its legend label, with named features nested '
-            'inside. Layers with no outline in QGIS get none here. Only the first '
-            'level of each symbol is read, so hatches, gradients and marker shapes '
-            'come out as plain fills to restyle. Rasters are rendered by QGIS and '
-            'embedded as images.</p>'
+            'inside. Layers with no outline in QGIS get none here. Every level of a '
+            'symbol is read — a polygon whose outline is a line level keeps it, and '
+            'is not filled with its colour — but only as a flat fill and a stroke, '
+            'so hatches, gradients and marker shapes come out plain, to restyle. '
+            'Rasters are rendered by QGIS and embedded as images.</p>'
             '<p><b>Alignment.</b> The file is written in millimetres at the page '
             'size, with the map placed where the frame sits, so it can be pasted in '
             'place over the layout own SVG export — which carries the labels and the '
@@ -437,6 +574,11 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
                     self.SPLIT_PARTS, section(shapes, tr('Separate islands into distinct paths')),
                     defaultValue=False),
                 QgsProcessingParameterNumber(
+                    self.MAX_TOLERANCE,
+                    section(shapes, tr('Maximum simplification allowed (mm on the page)')),
+                    PARAMETER_DOUBLE, defaultValue=DEFAULT_MAXIMUM_TOLERANCE, minValue=0.001,
+                    maxValue=5.0),
+                QgsProcessingParameterNumber(
                     self.SCALE_SEGMENTS, section(bar, tr('Number of segments')),
                     PARAMETER_INTEGER, defaultValue=2, minValue=1, maxValue=10),
                 QgsProcessingParameterNumber(
@@ -509,8 +651,44 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
             attributes.append('fill-opacity="{0}"'.format(number(opacity, 3)))
         return attributes
 
+    @staticmethod
+    def symbol_layers(symbol):
+        """Every level of a symbol, bottom to top, or an empty list."""
+        try:
+            return [symbol.symbolLayer(index) for index in range(symbol.symbolLayerCount())]
+        except (AttributeError, TypeError):
+            return []
+
+    @staticmethod
+    def layer_kind(symbol_layer):
+        """Fill, line or marker — a fill symbol may well hold a line level.
+
+        "Outline: simple line" is a line level sitting inside a polygon symbol;
+        reading its colour as a fill is what paints a whole country black.
+        """
+        try:
+            return symbol_layer.type()
+        except (AttributeError, TypeError):
+            if hasattr(symbol_layer, 'brushStyle'):
+                return SYMBOL_FILL
+            return SYMBOL_LINE if hasattr(symbol_layer, 'width') else SYMBOL_MARKER
+
+    def line_of(self, symbol_layer):
+        """Colour and width in millimetres of a line level."""
+        if self.pen_is_none(symbol_layer):
+            return None, None
+        colour = symbol_layer.color() if hasattr(symbol_layer, 'color') else None
+        width = None
+        if hasattr(symbol_layer, 'width'):
+            try:
+                unit = getattr(symbol_layer, 'widthUnit', lambda: None)()
+                width = self.render_millimetres(symbol_layer.width(), unit)
+            except (AttributeError, TypeError):
+                width = None
+        return colour, width
+
     def outline_of(self, symbol_layer):
-        """Outline colour and width in millimetres, or (None, None) when absent."""
+        """Outline colour and width of a fill or marker level, or (None, None)."""
         if symbol_layer is None or self.pen_is_none(symbol_layer):
             return None, None
         colour, width = None, None
@@ -527,28 +705,6 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
                 width = None
         return colour, width
 
-    @staticmethod
-    def default_style(geometry_type, radius):
-        if geometry_type == GEOMETRY_POLYGON:
-            return 'fill="#cccccc" stroke="none"', radius
-        if geometry_type == GEOMETRY_LINE:
-            return 'fill="none" stroke="#000000" stroke-width="0.2"', radius
-        return 'fill="#000000" stroke="none"', radius
-
-    def line_style(self, symbol, colour, fill_opacity, first, radius):
-        if first is not None and self.pen_is_none(first):
-            return 'fill="none" stroke="none"', radius
-        try:
-            width = self.render_millimetres(symbol.width(), symbol.outputUnit())
-        except (AttributeError, TypeError):
-            width = None
-        stroke_colour, _ = self.outline_of(first)
-        line_colour = stroke_colour if stroke_colour is not None else colour
-        attributes = ['fill="none"'] + self.stroke_attributes(line_colour, width or 0.2)
-        if fill_opacity < 0.999 and line_colour.alphaF() >= 0.999:
-            attributes.append('stroke-opacity="{0}"'.format(number(fill_opacity, 3)))
-        return ' '.join(attributes), radius
-
     @classmethod
     def marker_radius(cls, symbol, default):
         """Half the marker size in millimetres, or the default when it has none."""
@@ -557,6 +713,25 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         except (AttributeError, TypeError):
             return default
         return size / 2.0 if size and size > 0 else default
+
+    def read_symbol(self, symbol):
+        """Fill colour, stroke colour and stroke width, read across every level.
+
+        Levels are scanned rather than assumed: a polygon symbol can hold its
+        outline as a line level, in either order, and the fill may sit above it.
+        """
+        fill, stroke, width = None, None, None
+        for level in self.symbol_layers(symbol):
+            kind = self.layer_kind(level)
+            if kind == SYMBOL_LINE:
+                if stroke is None:
+                    stroke, width = self.line_of(level)
+                continue
+            if fill is None and not self.brush_is_none(level):
+                fill = level.color() if hasattr(level, 'color') else None
+            if stroke is None:
+                stroke, width = self.outline_of(level)
+        return fill, stroke, width
 
     def style_of(self, symbol, geometry_type, default_radius):
         """SVG presentation attributes and point radius read from a QGIS symbol."""
@@ -567,17 +742,24 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
             opacity = float(symbol.opacity())
         except (AttributeError, TypeError, ValueError):
             opacity = 1.0
-        colour = symbol.color()
-        fill_opacity = opacity * colour.alphaF()
-        first = symbol.symbolLayer(0) if symbol.symbolLayerCount() else None
+        fill, stroke, width = self.read_symbol(symbol)
         if geometry_type == GEOMETRY_LINE:
-            return self.line_style(symbol, colour, fill_opacity, first, radius)
+            colour = stroke if stroke is not None else fill
+            if colour is None:
+                colour = symbol.color()
+            attributes = ['fill="none"'] + self.stroke_attributes(
+                colour, width if width else 0.2)
+            if opacity < 0.999:
+                attributes.append('stroke-opacity="{0}"'.format(number(opacity, 3)))
+            return ' '.join(attributes), radius
         if geometry_type == GEOMETRY_POINT:
             radius = self.marker_radius(symbol, radius)
-        no_brush = first is not None and self.brush_is_none(first)
-        stroke_colour, stroke_width = self.outline_of(first)
-        attributes = (self.fill_attributes(colour, fill_opacity, no_brush)
-                      + self.stroke_attributes(stroke_colour, stroke_width))
+            if fill is None:
+                fill = symbol.color()
+        fill_opacity = opacity * (fill.alphaF() if fill is not None else 0.0)
+        attributes = (['fill="none"'] if fill is None
+                      else self.fill_attributes(fill, fill_opacity, False))
+        attributes += self.stroke_attributes(stroke, width)
         return ' '.join(attributes), radius
 
     # ---------------------------------------------------------------- layout read
@@ -870,7 +1052,8 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         if key not in classes:
             attributes, radius = self.style_of(symbol, geometry_type, options.default_radius)
             classes[key] = {'order': order, 'label': label, 'groups': {},
-                            'attributes': attributes, 'radius': radius, 'flat': []}
+                            'attributes': attributes, 'radius': radius, 'flat': [],
+                            'stroke': 'stroke="none"' not in attributes}
         return classes[key]
 
     @classmethod
@@ -895,7 +1078,7 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         request, transform = self.request_for(layer, writer, context)
         classes, pending = {}, {}
         dropped = {OUTSIDE: 0, REPROJECTION: 0, INVALID: 0, TOO_SMALL: 0, UNSYMBOLIZED: 0}
-        stats = {'simplified': 0, 'over': 0, 'tolerance': 0.0}
+        stats = {'simplified': 0, 'over': 0, 'separated': 0, 'tiled': 0, 'tolerance': 0.0}
         unnamed = tr('Unnamed')
         canceled = False
         try:
@@ -919,7 +1102,8 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
                     self.hold_for_join(pending, key, geometry, label,
                                        field_text(feature[join_field]).upper())
                     continue
-                pieces, small = writer.pieces(geometry, geometry_type, slot['radius'], stats)
+                pieces, small = writer.pieces(geometry, geometry_type, slot['radius'],
+                                              stats, slot['stroke'])
                 if not pieces:
                     dropped[TOO_SMALL if small else INVALID] += 1
                     continue
@@ -967,7 +1151,8 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
                 dropped[INVALID] += 1
                 continue
             slot = classes[entry['class']]
-            pieces, small = writer.pieces(joined, geometry_type, slot['radius'], stats)
+            pieces, small = writer.pieces(joined, geometry_type, slot['radius'], stats,
+                                          slot['stroke'])
             if not pieces:
                 dropped[TOO_SMALL if small else INVALID] += 1
                 continue
@@ -981,10 +1166,15 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
             feedback.pushInfo(tr(
                 'Layer "{0}": {1} shapes simplified, tolerance up to {2} mm.').format(
                     layer.name(), stats['simplified'], number(stats['tolerance'], 3)))
-        if stats['over']:
-            feedback.pushWarning(tr(
-                'Layer "{0}": {1} shapes still exceed the vertex limit.').format(
-                    layer.name(), stats['over']))
+        if stats['separated']:
+            feedback.pushInfo(tr(
+                'Layer "{0}": {1} shapes kept as separate paths so that merging them '
+                'would not exceed the vertex limit.').format(layer.name(), stats['separated']))
+        if stats['tiled']:
+            feedback.pushInfo(tr(
+                'Layer "{0}": {1} shapes too dense for one path were cut into tiles that '
+                'pave the same surface, with their outline drawn apart. No vertex was '
+                'lost.').format(layer.name(), stats['tiled']))
         reasons = ', '.join('{0} {1}'.format(count, reason_label(key))
                             for key, count in dropped.items() if count)
         if reasons:
@@ -1044,9 +1234,12 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
             'viewBox="0 0 {2} {3}">'.format(
                 number(page_width, 3), number(page_height, 3),
                 number(page_width, 3), number(page_height, 3)),
-            '<style>path{{fill-rule:evenodd}}path,circle{{stroke-linejoin:round}}'
-            '{0}</style>'.format(style),
-            '<g id="carte" transform="{0}" data-map-rotation="{1}">'.format(
+            '<style>{0}</style>'.format(style),
+            # Presentation attributes rather than a stylesheet rule: Illustrator
+            # only partly applies CSS on import, and both properties are
+            # inherited, so declaring them once on the map group is enough.
+            '<g id="carte" fill-rule="nonzero" stroke-linejoin="round" '
+            'transform="{0}" data-map-rotation="{1}">'.format(
                 frame['placement'], number(frame['map_rotation'], 6)),
         ]
         lines.extend(body)
@@ -1107,7 +1300,8 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
                 self.parameterAsInt(parameters, self.PRECISION, context),
                 self.parameterAsBool(parameters, self.SPLIT_PARTS, context),
                 self.parameterAsDouble(parameters, self.MIN_AREA, context),
-                self.parameterAsInt(parameters, self.MAX_VERTICES, context))
+                self.parameterAsInt(parameters, self.MAX_VERTICES, context),
+                self.parameterAsDouble(parameters, self.MAX_TOLERANCE, context))
         except ValueError:
             raise QgsProcessingException(tr('The map frame is degenerate.'))
 

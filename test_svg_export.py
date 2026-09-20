@@ -53,6 +53,32 @@ class Geometry:
     def asGeometryCollection(self):
         return [Geometry([polygon]) for polygon in self.polygons]
 
+    def isMultipart(self):
+        return len(self.polygons) > 1
+
+    def asPolygon(self):
+        # QGIS raises here rather than returning an empty list.
+        if len(self.polygons) != 1:
+            raise TypeError('MultiPolygon geometry cannot be converted to a polygon.')
+        return self.polygons[0]
+
+    def boundingBox(self):
+        xs = [point.x() for polygon in self.polygons for ring in polygon for point in ring]
+        ys = [point.y() for polygon in self.polygons for ring in polygon for point in ring]
+        return types.SimpleNamespace(
+            xMinimum=lambda: min(xs), yMinimum=lambda: min(ys),
+            width=lambda: max(xs) - min(xs), height=lambda: max(ys) - min(ys))
+
+    def intersection(self, other):
+        left, bottom, right, top = other.box
+        kept = []
+        for polygon in self.polygons:
+            inside = [point for point in polygon[0]
+                      if left <= point.x() <= right and bottom <= point.y() <= top]
+            if len(inside) >= 3:
+                kept.append([inside])
+        return Geometry(kept)
+
     def convertToMultiType(self):
         return True
 
@@ -93,6 +119,7 @@ def install_stubs():
         pass
 
     core.Qgis = types.SimpleNamespace(
+        SymbolType=types.SimpleNamespace(Fill='fill', Line='line', Marker='marker'),
         GeometryType=types.SimpleNamespace(Polygon='polygon', Line='line', Point='point'),
         WkbType=types.SimpleNamespace(GeometryCollection='GeometryCollection'),
         LayoutUnit=types.SimpleNamespace(Millimeters='mm'),
@@ -118,6 +145,8 @@ def install_stubs():
         PolygonGeometry='polygon', LineGeometry='line', PointGeometry='point',
         GeometryCollection='GeometryCollection')
     core.QgsRectangle = lambda *values: types.SimpleNamespace(values=values)
+    QgsGeometry.fromRect = staticmethod(
+        lambda rectangle: types.SimpleNamespace(box=rectangle.values))
     core.QgsUnitTypes = types.SimpleNamespace(
         LayoutMillimeters='mm', RenderMillimeters='rmm', RenderPoints='rpt',
         RenderInches='rin', RenderPixels='rpx')
@@ -269,28 +298,87 @@ class Paths(unittest.TestCase):
 
 class VertexReduction(unittest.TestCase):
     @staticmethod
+    def stats():
+        return {'simplified': 0, 'over': 0, 'separated': 0, 'tolerance': 0.0}
+
+    @staticmethod
     def dense(count):
         ring = [Point(i * 0.001, math.sin(i) * 0.5) for i in range(count)]
         return Geometry([[ring]])
 
     def test_leaves_a_light_shape_alone(self):
         frame = writer(max_vertices=10000)
-        stats = {'simplified': 0, 'over': 0, 'tolerance': 0.0}
+        stats = self.stats()
         geometry = self.dense(500)
         self.assertIs(frame.reduce_vertices(geometry, 'polygon', stats), geometry)
         self.assertEqual(stats['simplified'], 0)
 
     def test_brings_a_dense_shape_under_the_limit(self):
         frame = writer(max_vertices=10000)
-        stats = {'simplified': 0, 'over': 0, 'tolerance': 0.0}
+        stats = self.stats()
         reduced = frame.reduce_vertices(self.dense(40000), 'polygon', stats)
         self.assertLessEqual(frame.vertex_count(reduced), 10000)
         self.assertEqual(stats['simplified'], 1)
         self.assertGreater(stats['tolerance'], 0.0)
 
+    def test_never_simplifies_beyond_the_allowed_tolerance(self):
+        frame = writer(max_vertices=10000)
+        frame.max_tolerance = 0.02
+        stats = self.stats()
+        reduced = frame.reduce_vertices(self.dense(40000), 'polygon', stats)
+        self.assertLessEqual(stats['tolerance'], 0.02)
+        self.assertTrue(stats['simplified'] or stats['over'])
+
+    def test_leaves_a_shape_untouched_rather_than_deform_it(self):
+        # A shape no allowed tolerance can thin must come back exactly as it was.
+        frame = writer(max_vertices=10)
+        frame.max_tolerance = 0.01
+        stats = self.stats()
+        original = self.dense(40000)
+        reduced = frame.reduce_vertices(original, 'polygon', stats)
+        self.assertIs(reduced, original)
+        self.assertEqual(stats['over'], 1)
+        self.assertEqual(stats['simplified'], 0)
+
+    def test_thins_each_part_on_its_own_account(self):
+        # A dense mainland beside a small island: the island keeps its vertices.
+        mainland = [Point(index * 0.001, math.sin(index) * 0.5) for index in range(40000)]
+        island = [Point(50, 50), Point(50.1, 50), Point(50.1, 50.1), Point(50, 50.1)]
+        frame = writer(max_vertices=10000, min_area=0.0)
+        stats = self.stats()
+        pieces, _ = frame.polygon_pieces(Geometry([[mainland], [island]]), stats)
+        subpaths = pieces[0].split('M')[1:] if len(pieces) == 1 else \
+            [piece.split('M')[1] for piece in pieces]
+        self.assertEqual(len(subpaths), 2)
+        # The island is written whole: four corners, none lost to the mainland.
+        self.assertEqual(subpaths[1].count(','), 4)
+
+    def test_survives_a_part_that_repair_split_into_several_polygons(self):
+        """simplify + makeValid can turn one polygon into a multipolygon."""
+        class Splitting(Geometry):
+            def simplify(self, tolerance):
+                first = [Point(0, 0), Point(1, 0), Point(1, 1)]
+                second = [Point(5, 5), Point(6, 5), Point(6, 6)]
+                return Geometry([[first], [second]])
+
+        dense = [Point(index * 0.001, math.sin(index)) for index in range(40000)]
+        frame = writer(max_vertices=10, min_area=0.0)
+        pieces, _ = frame.polygon_pieces(Splitting([[dense]]), self.stats())
+        self.assertTrue(pieces)
+
+    def test_keeps_parts_separate_when_merging_them_would_overflow(self):
+        first = [Point(index * 0.001, math.sin(index) * 0.5) for index in range(9000)]
+        second = [Point(50 + index * 0.001, math.cos(index) * 0.5) for index in range(9000)]
+        frame = writer(max_vertices=10000, min_area=0.0)
+        frame.max_tolerance = 0.0  # no thinning allowed at all
+        stats = self.stats()
+        pieces, _ = frame.polygon_pieces(Geometry([[first], [second]]), stats)
+        self.assertEqual(len(pieces), 2)
+        self.assertEqual(stats['separated'], 1)
+
     def test_disabled_when_the_limit_is_zero(self):
         frame = writer(max_vertices=0)
-        stats = {'simplified': 0, 'over': 0, 'tolerance': 0.0}
+        stats = self.stats()
         geometry = self.dense(40000)
         self.assertIs(frame.reduce_vertices(geometry, 'polygon', stats), geometry)
 
@@ -299,6 +387,83 @@ class VertexReduction(unittest.TestCase):
         geometry = Geometry([[light], [heavy]])
         self.assertEqual(writer(split_parts=False).vertex_count(geometry), 100)
         self.assertEqual(writer(split_parts=True).vertex_count(geometry), 90)
+
+
+class DenseShapes(unittest.TestCase):
+    """A shape no tolerance can thin is tiled, never left to be truncated."""
+
+    @staticmethod
+    def stats():
+        return {'simplified': 0, 'over': 0, 'separated': 0, 'tiled': 0, 'tolerance': 0.0}
+
+    @staticmethod
+    def stubborn(count):
+        """A shape no tolerance thins, laid out on a grid so tiles can bite."""
+        class Stubborn(Geometry):
+            def simplify(self, tolerance):
+                return self
+
+        return Stubborn([[[Point(index % 200, index // 200) for index in range(count)]]])
+
+    def test_chunks_repeat_a_point_so_the_line_stays_continuous(self):
+        runs = module.FrameWriter.chunks(list(range(10)), 4)
+        self.assertEqual(runs[0][-1], runs[1][0])
+        self.assertEqual(runs[-1][-1], 9)
+        self.assertTrue(all(len(run) <= 4 for run in runs))
+
+    def test_a_short_ring_is_left_in_one_run(self):
+        self.assertEqual(module.FrameWriter.chunks([1, 2, 3], 10), [[1, 2, 3]])
+
+    def test_an_untameable_shape_is_tiled_rather_than_written_whole(self):
+        frame = writer(max_vertices=1000, min_area=0.0)
+        stats = self.stats()
+        pieces, _ = frame.polygon_pieces(self.stubborn(40000), stats, stroke=True)
+        self.assertEqual(stats['tiled'], 1)
+        self.assertGreater(len(pieces), 1)
+        # Tiles carry the fill without a stroke, so their edges never show.
+        self.assertTrue(any('stroke="none"' in piece for piece in pieces))
+        # The outline is drawn apart, unfilled.
+        self.assertTrue(any('fill="none"' in piece for piece in pieces))
+
+    def test_no_outline_is_written_when_the_class_has_no_stroke(self):
+        frame = writer(max_vertices=1000, min_area=0.0)
+        pieces, _ = frame.polygon_pieces(self.stubborn(40000), self.stats(), stroke=False)
+        self.assertFalse(any('fill="none"' in piece for piece in pieces))
+
+    def test_every_written_path_stays_under_the_limit(self):
+        frame = writer(max_vertices=1000, min_area=0.0)
+        pieces, _ = frame.polygon_pieces(self.stubborn(40000), self.stats(), stroke=True)
+        import re as regular
+        for piece in pieces:
+            data = regular.search(r'd="([^"]*)"', piece).group(1)
+            self.assertLessEqual(data.count(','), 1000)
+
+
+class RingOrientation(unittest.TestCase):
+    """Holes must cut, and overlapping outlines must add up, under fill-rule nonzero."""
+
+    square = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+    hole = [(2.0, 2.0), (4.0, 2.0), (4.0, 4.0), (2.0, 4.0)]
+
+    def sign(self, ring):
+        return module.FrameWriter.signed_ring_area(ring) >= 0
+
+    def test_a_hole_is_turned_against_its_exterior(self):
+        exterior, hole = module.FrameWriter.oriented([self.square, self.hole])
+        self.assertNotEqual(self.sign(exterior), self.sign(hole))
+
+    def test_a_hole_already_turned_the_right_way_is_left_alone(self):
+        rings = module.FrameWriter.oriented([self.square, self.hole[::-1]])
+        self.assertEqual(rings[1], self.hole[::-1])
+
+    def test_two_separate_outlines_turn_the_same_way(self):
+        first = module.FrameWriter.oriented([self.square])[0]
+        second = module.FrameWriter.oriented([self.square[::-1]])[0]
+        self.assertEqual(self.sign(first), self.sign(second))
+
+    def test_area_stays_positive_whichever_way_a_ring_turns(self):
+        self.assertAlmostEqual(module.FrameWriter.ring_area(self.square), 100.0, 9)
+        self.assertAlmostEqual(module.FrameWriter.ring_area(self.square[::-1]), 100.0, 9)
 
 
 class MinimumArea(unittest.TestCase):
@@ -310,7 +475,8 @@ class MinimumArea(unittest.TestCase):
         speck = [Point(origin.x() + 0.1 * scale, origin.y()),
                  Point(origin.x() + 0.2 * scale, origin.y()),
                  Point(origin.x() + 0.2 * scale, origin.y() - 0.1 * scale)]
-        pieces, small = frame.polygon_pieces(Geometry([[speck]]))
+        pieces, small = frame.polygon_pieces(
+            Geometry([[speck]]), {'simplified': 0, 'over': 0, 'separated': 0, 'tolerance': 0.0})
         self.assertEqual(pieces, [])
         self.assertEqual(small, 1)
 
@@ -332,185 +498,115 @@ class JoinKeys(unittest.TestCase):
 
 
 class Styles(unittest.TestCase):
+    """Colours are read across every level of a symbol, whatever its type."""
+
     @staticmethod
-    def symbol(colour='#3366cc', opacity=1.0, pen=None, brush=None,
-               stroke='#000000', width=0.26):
-        layer = types.SimpleNamespace(
+    def fill_level(colour='#3366cc', stroke='#000000', width=0.26, pen=None, brush=None):
+        level = types.SimpleNamespace(
+            type=lambda: 'fill',
+            color=lambda: QtGui.QColor(colour),
             strokeColor=lambda: QtGui.QColor(stroke),
             strokeWidth=lambda: width,
             strokeWidthUnit=lambda: 'rmm')
         if pen is not None:
-            layer.strokeStyle = lambda: pen
+            level.strokeStyle = lambda: pen
         if brush is not None:
-            layer.brushStyle = lambda: brush
+            level.brushStyle = lambda: brush
+        return level
+
+    @staticmethod
+    def line_level(colour='#0000ff', width=0.5, pen=None):
+        level = types.SimpleNamespace(
+            type=lambda: 'line',
+            color=lambda: QtGui.QColor(colour),
+            width=lambda: width,
+            widthUnit=lambda: 'rmm')
+        if pen is not None:
+            level.penStyle = lambda: pen
+        return level
+
+    @staticmethod
+    def marker_level(colour='#ff0000', size=3.0, stroke='#000000', width=0.2):
+        return types.SimpleNamespace(
+            type=lambda: 'marker',
+            color=lambda: QtGui.QColor(colour),
+            strokeColor=lambda: QtGui.QColor(stroke),
+            strokeWidth=lambda: width,
+            strokeWidthUnit=lambda: 'rmm',
+            size=lambda: size,
+            sizeUnit=lambda: 'rmm')
+
+    @classmethod
+    def symbol(cls, levels, opacity=1.0, colour='#3366cc'):
         return types.SimpleNamespace(
             color=lambda: QtGui.QColor(colour), opacity=lambda: opacity,
-            symbolLayerCount=lambda: 1, symbolLayer=lambda index: layer)
+            symbolLayerCount=lambda: len(levels),
+            symbolLayer=lambda index: levels[index],
+            size=lambda: 3.0, sizeUnit=lambda: 'rmm')
 
     def setUp(self):
         self.algorithm = module.ExportLayoutSvg.__new__(module.ExportLayoutSvg)
 
+    def style(self, levels, geometry_type='polygon', **kwargs):
+        return self.algorithm.style_of(self.symbol(levels, **kwargs), geometry_type, 0.8)[0]
+
     def test_fills_a_polygon_and_keeps_its_outline(self):
-        attributes, _ = self.algorithm.style_of(self.symbol(), 'polygon', 0.8)
+        attributes = self.style([self.fill_level()])
         self.assertIn('fill="#3366cc"', attributes)
         self.assertIn('stroke="#000000"', attributes)
         self.assertIn('stroke-width="0.26"', attributes)
 
+    def test_a_polygon_drawn_only_with_a_line_level_is_not_filled(self):
+        # "Outline: simple line" is a line level inside a polygon symbol.
+        attributes = self.style([self.line_level(colour='#112233', width=0.4)])
+        self.assertIn('fill="none"', attributes)
+        self.assertIn('stroke="#112233"', attributes)
+        self.assertIn('stroke-width="0.4"', attributes)
+
+    def test_a_line_level_below_a_fill_gives_the_outline_not_the_fill(self):
+        attributes = self.style([self.line_level(colour='#112233'),
+                                 self.fill_level(colour='#eeddcc')])
+        self.assertIn('fill="#eeddcc"', attributes)
+        self.assertIn('stroke="#112233"', attributes)
+
+    def test_a_line_keeps_its_own_colour(self):
+        for colour in ('#0000ff', '#ffffff'):
+            attributes = self.style([self.line_level(colour=colour)], 'line')
+            self.assertIn('stroke="{0}"'.format(colour), attributes)
+            self.assertIn('fill="none"', attributes)
+
+    def test_a_line_keeps_its_own_width(self):
+        attributes = self.style([self.line_level(width=1.5)], 'line')
+        self.assertIn('stroke-width="1.5"', attributes)
+
     def test_no_pen_means_no_stroke(self):
-        symbol = self.symbol(pen=QtCore.Qt.PenStyle.NoPen)
-        attributes, _ = self.algorithm.style_of(symbol, 'polygon', 0.8)
+        attributes = self.style([self.fill_level(pen=QtCore.Qt.PenStyle.NoPen)])
         self.assertIn('stroke="none"', attributes)
         self.assertNotIn('stroke-width', attributes)
 
     def test_no_brush_means_no_fill(self):
-        symbol = self.symbol(brush=QtCore.Qt.BrushStyle.NoBrush)
-        attributes, _ = self.algorithm.style_of(symbol, 'polygon', 0.8)
+        attributes = self.style([self.fill_level(brush=QtCore.Qt.BrushStyle.NoBrush)])
         self.assertIn('fill="none"', attributes)
 
     def test_zero_width_is_a_hairline_not_an_absence(self):
-        attributes, _ = self.algorithm.style_of(self.symbol(width=0.0), 'polygon', 0.8)
+        attributes = self.style([self.fill_level(width=0.0)])
         self.assertIn('stroke="#000000"', attributes)
         self.assertIn('stroke-width="0.03"', attributes)
 
     def test_opacity_reaches_the_fill(self):
-        attributes, _ = self.algorithm.style_of(self.symbol(opacity=0.5), 'polygon', 0.8)
+        attributes = self.style([self.fill_level()], opacity=0.5)
         self.assertIn('fill-opacity="0.5"', attributes)
+
+    def test_a_marker_keeps_its_colour_and_its_size(self):
+        symbol = self.symbol([self.marker_level(colour='#ff0000', size=3.0)])
+        attributes, radius = self.algorithm.style_of(symbol, 'point', 0.8)
+        self.assertIn('fill="#ff0000"', attributes)
+        self.assertAlmostEqual(radius, 1.5, 9)
 
     def test_units_convert_to_millimetres(self):
         self.assertAlmostEqual(module.ExportLayoutSvg.render_millimetres(72.0, 'rpt'), 25.4, 9)
         self.assertAlmostEqual(module.ExportLayoutSvg.render_millimetres(1.0, 'rin'), 25.4, 9)
         self.assertIsNone(module.ExportLayoutSvg.render_millimetres(1.0, 'map units'))
-
-
-class ScaleBarMeasurement(unittest.TestCase):
-    """The formula behind the variable bar, checked against geodetic references."""
-
-    WGS84 = (6378137.0, 6356752.314245)
-
-    def kilometres_per_degree(self, latitude, axes=None):
-        major, minor = axes or self.WGS84
-        return 1.0 / scale_bar.delta_longitude(1000.0, latitude, major, minor)
-
-    def test_matches_the_published_length_of_a_degree(self):
-        for latitude, expected in ((0, 111.320), (30, 96.486), (45, 78.847),
-                                   (60, 55.800), (75, 28.902)):
-            self.assertAlmostEqual(self.kilometres_per_degree(latitude), expected, 2)
-
-    def test_works_on_a_sphere_where_the_axes_are_equal(self):
-        self.assertAlmostEqual(
-            self.kilometres_per_degree(0, (6371000.0, 6371000.0)), 111.195, 2)
-
-    def test_refuses_a_pole_where_the_parallel_has_no_length(self):
-        self.assertIsNone(scale_bar.delta_longitude(1000.0, 90.0, *self.WGS84))
-
-    def test_rounds_the_automatic_distance_down_to_a_readable_value(self):
-        self.assertEqual(scale_bar.nice_distance(8030000.0), 5000000.0)
-        self.assertEqual(scale_bar.nice_distance(1234.0), 1000.0)
-        self.assertEqual(scale_bar.nice_distance(260000.0), 250000.0)
-
-    def test_labels_switch_to_metres_below_a_kilometre(self):
-        self.assertEqual(scale_bar.distance_label(2500000.0), ('2500', 'km'))
-        self.assertEqual(scale_bar.distance_label(500.0), ('500', 'm'))
-
-    def test_reads_latitudes_and_drops_what_it_cannot_use(self):
-        self.assertEqual(scale_bar.latitudes_of('0, 30; 45°, 60 , 95, oops, 45'),
-                         [0.0, 30.0, 45.0, 60.0])
-        self.assertEqual(scale_bar.latitudes_of('nothing here'), [])
-
-
-class ScaleBarLayout(unittest.TestCase):
-    """The caption and the projection line, and where they sit."""
-
-    Options = __import__('collections').namedtuple(
-        'Options', 'distance segments x y height font caption')
-
-    def bar(self, footer):
-        options = self.Options(distance=1000.0, segments=2, x=0.0, y=0.0, height=2.0,
-                               font=2.5, caption='Distances along parallels')
-        return scale_bar.ScaleBar(options, (6371000.0, 6371000.0), 0.0, None, None,
-                                  footer)
-
-    def test_keeps_the_lines_given_and_drops_the_empty_ones(self):
-        self.assertEqual(self.bar(['Caption', '', None, 'Equal Earth (ESRI:53036)']).footer,
-                         ['Caption', 'Equal Earth (ESRI:53036)'])
-
-    def test_reserves_room_below_the_bars_for_every_line(self):
-        one = self.bar(['Caption']).geometry_of((297.0, 210.0), 5)
-        two = self.bar(['Caption', 'Equal Earth']).geometry_of((297.0, 210.0), 5)
-        self.assertLess(two['top'], one['top'])
-        self.assertAlmostEqual(one['top'] - two['top'], 2.5 * 1.3, 6)
-
-    def test_names_the_projection_with_its_code(self):
-        crs = types.SimpleNamespace(description=lambda: 'Sphere Equal Earth Greenwich',
-                                    authid=lambda: 'ESRI:53036')
-        self.assertEqual(module.ExportLayoutSvg.projection_name(crs),
-                         'Sphere Equal Earth Greenwich (ESRI:53036)')
-
-    def test_falls_back_to_whichever_part_exists(self):
-        self.assertEqual(module.ExportLayoutSvg.projection_name(
-            types.SimpleNamespace(description=lambda: '', authid=lambda: 'EPSG:4326')),
-            'EPSG:4326')
-        self.assertEqual(module.ExportLayoutSvg.projection_name(
-            types.SimpleNamespace(description=lambda: '', authid=lambda: '')), '')
-
-
-class VisibleLatitudes(unittest.TestCase):
-    """Only the parallels the frame actually shows deserve a bar."""
-
-    Options = __import__('collections').namedtuple(
-        'Options', 'distance segments x y height font caption')
-
-    class Frame:
-        """A frame covering latitudes -60 to 60 at the measuring longitude."""
-
-        def __init__(self):
-            self.mask = types.SimpleNamespace(
-                contains=lambda point: abs(point.y()) <= 60.0)
-            self.extent = types.SimpleNamespace(
-                contains=lambda point: abs(point.y()) <= 60.0)
-            self.width = 200.0
-
-    class Identity:
-        @staticmethod
-        def transform(point):
-            return point
-
-    def bar(self, only_visible=True):
-        options = self.Options(distance=1000.0, segments=2, x=0.0, y=0.0, height=2.0,
-                               font=2.5, caption='')
-        return scale_bar.ScaleBar(options, (6371000.0, 6371000.0), 0.0, self.Identity(),
-                                  self.Frame(), (), only_visible)
-
-    def test_keeps_a_parallel_inside_the_frame(self):
-        self.assertTrue(self.bar().on_the_map(45.0))
-
-    def test_drops_a_parallel_the_map_does_not_show(self):
-        self.assertFalse(self.bar().on_the_map(75.0))
-
-    def test_keeps_everything_when_the_option_is_off(self):
-        self.assertTrue(self.bar(only_visible=False).on_the_map(75.0))
-
-    def test_reports_when_no_latitude_is_on_the_map(self):
-        class Feedback:
-            def __init__(self):
-                self.lines = []
-
-            def pushInfo(self, text):
-                self.lines.append(text)
-
-            def pushWarning(self, text):
-                self.lines.append(text)
-
-        feedback = Feedback()
-        metres, lengths, reason = self.bar().measure([80.0, 85.0], feedback)
-        self.assertEqual(lengths, [])
-        self.assertIn('latitudes', reason)
-        self.assertEqual(len(feedback.lines), 2)
-
-
-class Sections(unittest.TestCase):
-    def test_a_label_carries_its_section(self):
-        self.assertEqual(module.section('Carte', 'Mise en page'), 'Carte · Mise en page')
 
 
 class Document(unittest.TestCase):
@@ -529,6 +625,12 @@ class Document(unittest.TestCase):
         text = module.ExportLayoutSvg.document(self.frame, self.body())
         root = ElementTree.fromstring(text)
         self.assertTrue(root.tag.endswith('svg'))
+
+    def test_the_fill_rule_is_an_attribute_not_a_stylesheet_rule(self):
+        root = ElementTree.fromstring(
+            module.ExportLayoutSvg.document(self.frame, self.body()))
+        carte = [child for child in root if child.get('id') == 'carte'][0]
+        self.assertEqual(carte.get('fill-rule'), 'nonzero')
 
     def test_the_scale_bar_sits_beside_the_map_group_not_inside_it(self):
         scale = ['<g id="echelle">', '<rect x="10" y="10" width="20" height="2"/>', '</g>']

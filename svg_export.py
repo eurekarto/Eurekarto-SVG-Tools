@@ -18,35 +18,21 @@ from collections import namedtuple
 from qgis.PyQt.QtCore import QBuffer, QIODevice, QSize, QSizeF, Qt
 from qgis.PyQt.QtGui import QColor
 from qgis.core import (
-    Qgis, QgsCoordinateTransform, QgsExpressionContext, QgsExpressionContextUtils,
-    QgsFeatureRequest, QgsGeometry, QgsLayoutItemMap, QgsLayoutItemRegistry,
-    QgsMapRendererParallelJob, QgsMapSettings, QgsPointXY, QgsProcessing,
-    QgsProcessingAlgorithm, QgsProcessingException, QgsProcessingParameterBoolean,
+    Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsExpressionContext,
+    QgsExpressionContextUtils, QgsFeatureRequest, QgsGeometry, QgsLayoutItemMap,
+    QgsLayoutItemRegistry, QgsMapRendererParallelJob, QgsMapSettings, QgsPointXY,
+    QgsProcessing, QgsProcessingAlgorithm, QgsProcessingException,
+    QgsProcessingParameterBoolean, QgsProcessingParameterDefinition,
     QgsProcessingParameterField, QgsProcessingParameterFileDestination,
     QgsProcessingParameterLayout, QgsProcessingParameterLayoutItem,
     QgsProcessingParameterMatrix, QgsProcessingParameterMultipleLayers,
-    QgsProcessingParameterNumber, QgsProcessingParameterVectorLayer, QgsRectangle,
-    QgsRenderContext, QgsUnitTypes, QgsVariantUtils, QgsVectorLayer, QgsWkbTypes,
+    QgsProcessingParameterNumber, QgsProcessingParameterString,
+    QgsProcessingParameterVectorLayer, QgsRectangle, QgsRenderContext, QgsUnitTypes,
+    QgsVariantUtils, QgsVectorLayer, QgsWkbTypes,
 )
 
-from .common import tr
-
-
-def _enum(owner, scope, name, legacy_owner=None, legacy_name=None):
-    """Enum member, whether the build exposes it scoped, flat, or under its old name.
-
-    QGIS 3.30 moved several enumerations into the Qgis namespace and Qt 6 dropped
-    flat access to Qt enums; both spellings must keep working from QGIS 3.40 to
-    QGIS 4.
-    """
-    holder = getattr(owner, scope, None)
-    if holder is not None and hasattr(holder, name):
-        return getattr(holder, name)
-    if hasattr(owner, name):
-        return getattr(owner, name)
-    if legacy_owner is not None:
-        return getattr(legacy_owner, legacy_name or name)
-    raise AttributeError('{0}.{1} not found'.format(scope, name))
+from .common import enum as _enum, number, tr, xml_text
+from .scale_bar import ScaleBar, ellipsoid_of, latitudes_of
 
 
 GEOMETRY_POLYGON = _enum(Qgis, 'GeometryType', 'Polygon', QgsWkbTypes, 'PolygonGeometry')
@@ -69,6 +55,8 @@ TRANSFORM_SUCCESS = _enum(Qgis, 'GeometryOperationResult', 'Success')
 NO_PEN = _enum(Qt, 'PenStyle', 'NoPen')
 NO_BRUSH = _enum(Qt, 'BrushStyle', 'NoBrush')
 WRITE_ONLY = _enum(QIODevice, 'OpenModeFlag', 'WriteOnly')
+ADVANCED_PARAMETER = _enum(Qgis, 'ProcessingParameterFlag', 'Advanced',
+                           QgsProcessingParameterDefinition, 'FlagAdvanced')
 
 # Values that look like an ISO code but are "no data" markers. None of them is a
 # valid ISO 3166 alpha-2 or alpha-3 code: 'NA' (Namibia) is deliberately absent.
@@ -82,6 +70,8 @@ FIRST_TOLERANCE = 0.01
 TOLERANCE_STEPS = 14
 
 Options = namedtuple('Options', 'use_style clip raster_dpi default_radius')
+ScaleOptions = namedtuple(
+    'ScaleOptions', 'distance segments x y height font caption')
 
 # Counting keys for dropped features; translated only when the log line is built.
 OUTSIDE, REPROJECTION, INVALID, TOO_SMALL, UNSYMBOLIZED = (
@@ -94,19 +84,6 @@ def reason_label(key):
             INVALID: tr('unrepairable geometry'),
             TOO_SMALL: tr('below the minimum area'),
             UNSYMBOLIZED: tr('not drawn by the symbology')}[key]
-
-
-def number(value, precision):
-    """Shortest fixed-point spelling, without a trailing zero or a negative zero."""
-    text = '{:.{}f}'.format(value, precision)
-    if '.' in text:
-        text = text.rstrip('0').rstrip('.')
-    return '0' if text in ('', '-0') else text
-
-
-def xml_text(text):
-    return (text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-            .replace('"', '&quot;'))
 
 
 def xml_identifier(text, used):
@@ -311,6 +288,15 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
     POINT_RADIUS = 'POINT_RADIUS'
     SPLIT_PARTS = 'SPLIT_PARTS'
     MAX_VERTICES = 'MAX_VERTICES'
+    SCALE_BAR = 'SCALE_BAR'
+    SCALE_LATITUDES = 'SCALE_LATITUDES'
+    SCALE_DISTANCE = 'SCALE_DISTANCE'
+    SCALE_CAPTION = 'SCALE_CAPTION'
+    SCALE_SEGMENTS = 'SCALE_SEGMENTS'
+    SCALE_X = 'SCALE_X'
+    SCALE_Y = 'SCALE_Y'
+    SCALE_HEIGHT = 'SCALE_HEIGHT'
+    SCALE_FONT = 'SCALE_FONT'
     OUTPUT = 'OUTPUT'
 
     def name(self):
@@ -408,6 +394,35 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterNumber(
             self.MAX_VERTICES, tr('Maximum vertices per shape (0 = no limit)'),
             PARAMETER_INTEGER, defaultValue=10000, minValue=0, maxValue=10000000))
+        self.addParameter(QgsProcessingParameterBoolean(
+            self.SCALE_BAR, tr('Add a variable scale bar'), defaultValue=False))
+        self.addParameter(QgsProcessingParameterString(
+            self.SCALE_LATITUDES, tr('Latitudes to show (degrees, comma separated)'),
+            defaultValue='0, 30, 45, 60, 75'))
+        self.addParameter(QgsProcessingParameterNumber(
+            self.SCALE_DISTANCE, tr('Distance per segment in kilometres (0 = automatic)'),
+            PARAMETER_DOUBLE, defaultValue=0, minValue=0))
+        self.addParameter(QgsProcessingParameterString(
+            self.SCALE_CAPTION, tr('Scale bar caption'),
+            defaultValue=tr('Distances along parallels'), optional=True))
+        for parameter in (
+                QgsProcessingParameterNumber(
+                    self.SCALE_SEGMENTS, tr('Number of segments'), PARAMETER_INTEGER,
+                    defaultValue=2, minValue=1, maxValue=10),
+                QgsProcessingParameterNumber(
+                    self.SCALE_X, tr('Scale bar position from the left (mm, 0 = automatic)'),
+                    PARAMETER_DOUBLE, defaultValue=0, minValue=0),
+                QgsProcessingParameterNumber(
+                    self.SCALE_Y, tr('Scale bar position from the top (mm, 0 = automatic)'),
+                    PARAMETER_DOUBLE, defaultValue=0, minValue=0),
+                QgsProcessingParameterNumber(
+                    self.SCALE_HEIGHT, tr('Bar height (mm)'), PARAMETER_DOUBLE,
+                    defaultValue=2.0, minValue=0.2),
+                QgsProcessingParameterNumber(
+                    self.SCALE_FONT, tr('Scale bar text size (mm)'), PARAMETER_DOUBLE,
+                    defaultValue=2.5, minValue=0.5)):
+            parameter.setFlags(parameter.flags() | ADVANCED_PARAMETER)
+            self.addParameter(parameter)
         self.addParameter(QgsProcessingParameterFileDestination(
             self.OUTPUT, tr('SVG file'), fileFilter='SVG (*.svg)'))
 
@@ -971,8 +986,12 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
     # ----------------------------------------------------------------- execution
 
     @staticmethod
-    def document(frame, body):
-        """The complete SVG document, page-sized and placed on the frame."""
+    def document(frame, body, scale=(), style=''):
+        """The complete SVG document: the map group, then the scale bar beside it.
+
+        The scale bar sits outside the map group on purpose: its coordinates are
+        page millimetres, while the map group carries the frame's placement.
+        """
         page_width, page_height = frame['page']
         lines = [
             '<?xml version="1.0" encoding="UTF-8"?>',
@@ -981,14 +1000,48 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
             'viewBox="0 0 {2} {3}">'.format(
                 number(page_width, 3), number(page_height, 3),
                 number(page_width, 3), number(page_height, 3)),
-            '<style>path{fill-rule:evenodd}path,circle{stroke-linejoin:round}</style>',
+            '<style>path{{fill-rule:evenodd}}path,circle{{stroke-linejoin:round}}'
+            '{0}</style>'.format(style),
             '<g id="carte" transform="{0}" data-map-rotation="{1}">'.format(
                 frame['placement'], number(frame['map_rotation'], 6)),
         ]
         lines.extend(body)
         lines.append('</g>')
+        lines.extend(scale)
         lines.append('</svg>')
         return '\n'.join(lines) + '\n'
+
+    def scale_bar_of(self, parameters, context, item, writer, frame, feedback):
+        """The scale bar block and its style, or ([], '') when it is not wanted."""
+        if not self.parameterAsBool(parameters, self.SCALE_BAR, context):
+            return [], ''
+        latitudes = latitudes_of(
+            self.parameterAsString(parameters, self.SCALE_LATITUDES, context))
+        if not latitudes:
+            raise QgsProcessingException(
+                tr('Give at least one latitude between -85 and 85.'))
+        options = ScaleOptions(
+            distance=self.parameterAsDouble(parameters, self.SCALE_DISTANCE, context),
+            segments=self.parameterAsInt(parameters, self.SCALE_SEGMENTS, context),
+            x=self.parameterAsDouble(parameters, self.SCALE_X, context),
+            y=self.parameterAsDouble(parameters, self.SCALE_Y, context),
+            height=self.parameterAsDouble(parameters, self.SCALE_HEIGHT, context),
+            font=self.parameterAsDouble(parameters, self.SCALE_FONT, context),
+            caption=self.parameterAsString(parameters, self.SCALE_CAPTION, context))
+        wgs84 = QgsCoordinateReferenceSystem('EPSG:4326')
+        to_map = QgsCoordinateTransform(wgs84, frame['crs'], context.transformContext())
+        try:
+            longitude = QgsCoordinateTransform(
+                frame['crs'], wgs84, context.transformContext()).transform(
+                    item.extent().center()).x()
+        except Exception:
+            longitude = 0.0
+        major, minor, name = ellipsoid_of(context.project(), frame['crs'], context)
+        feedback.pushInfo(tr('Scale bar: centre longitude {0}°, measured on {1}.').format(
+            number(longitude, 4), name))
+        bar = ScaleBar(options, (major, minor), longitude, to_map, writer)
+        block = bar.build(frame['page'], latitudes, feedback)
+        return block, bar.style(options.font) if block else ''
 
     def writer_for(self, parameters, context, frame):
         try:
@@ -1047,8 +1100,10 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
 
         if not body:
             raise QgsProcessingException(tr('Nothing to export inside the map frame.'))
+        scale, scale_style = self.scale_bar_of(parameters, context, item, writer,
+                                               frame, feedback)
         with open(destination, 'w', encoding='utf-8') as handle:
-            handle.write(self.document(frame, body))
+            handle.write(self.document(frame, body, scale, scale_style))
         if canceled:
             feedback.pushWarning(tr(
                 'Canceled: {0} is incomplete — check which layers it holds.').format(

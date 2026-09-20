@@ -2,7 +2,7 @@
 name=Eurekarto SVG Tools
 qgisMinimumVersion=3.40
 qgisMaximumVersion=4.99
-version=1.0.3
+version=1.1.0
 author=Blanche Lambert / Eurêkarto
 email=contact@eurekarto.com
 description=Export a print layout map frame to a grouped, named SVG for Illustrator or Inkscape.
@@ -17,7 +17,8 @@ deprecated=False
 hasProcessingProvider=True
 license=GPL-2.0-or-later
 tags=svg,export,illustrator,inkscape,cartography,layout,cad
-changelog=1.0.3 Repository, homepage and tracker declared.
+changelog=1.1.0 Optional variable scale bar written into the same SVG, beside the map group: one bar per latitude, each measured along its own parallel, so a small-scale map keeps an honest scale where a single bar cannot. Distances are computed from the ellipsoid radius of curvature, which also works on sphere-based projections.
+    1.0.3 Repository, homepage and tracker declared.
     1.0.2 Review pass: the map group is now placed by the frame scene transform, so a rotated frame lands where QGIS draws it; the toolbar icon is registered again; enum access works on both Qt 5 and Qt 6; layer type is tested by class rather than by a deprecated enum; 33 unit tests added.
     1.0.1 Automatic vertex reduction for shapes above a limit (default 10000), so Illustrator no longer drops very dense paths; simplification tolerance is set in millimetres on the page and reported in the log.
     1.0.0 First release.

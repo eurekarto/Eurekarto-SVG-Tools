@@ -13,7 +13,7 @@ from qgis.core import QgsApplication
 from .common import tr
 from .provider import EurekartoSvgToolsProvider
 
-VERSION = '1.0.3'
+VERSION = '1.1.0'
 
 
 class EurekartoSvgTools:

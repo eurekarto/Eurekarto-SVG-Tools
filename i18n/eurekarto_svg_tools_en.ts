@@ -15,6 +15,14 @@
       <translation>About</translation>
     </message>
     <message>
+      <source>Add a variable scale bar</source>
+      <translation>Add a variable scale bar</translation>
+    </message>
+    <message>
+      <source>Bar height (mm)</source>
+      <translation>Bar height (mm)</translation>
+    </message>
+    <message>
       <source>Canceled: {0} is incomplete — check which layers it holds.</source>
       <translation>Canceled: {0} is incomplete — check which layers it holds.</translation>
     </message>
@@ -47,6 +55,14 @@
       <translation>Default point size (mm)</translation>
     </message>
     <message>
+      <source>Distance per segment in kilometres (0 = automatic)</source>
+      <translation>Distance per segment in kilometres (0 = automatic)</translation>
+    </message>
+    <message>
+      <source>Distances along parallels</source>
+      <translation>Distances along parallels</translation>
+    </message>
+    <message>
       <source>Embed images (rasters)</source>
       <translation>Embed images (rasters)</translation>
     </message>
@@ -59,6 +75,10 @@
       <translation>Field holding the names</translation>
     </message>
     <message>
+      <source>Give at least one latitude between -85 and 85.</source>
+      <translation>Give at least one latitude between -85 and 85.</translation>
+    </message>
+    <message>
       <source>Grouping field</source>
       <translation>Grouping field</translation>
     </message>
@@ -69,6 +89,14 @@
     <message>
       <source>Keep the colours and classes from QGIS</source>
       <translation>Keep the colours and classes from QGIS</translation>
+    </message>
+    <message>
+      <source>Latitude {0}° skipped: {1}.</source>
+      <translation>Latitude {0}° skipped: {1}.</translation>
+    </message>
+    <message>
+      <source>Latitudes to show (degrees, comma separated)</source>
+      <translation>Latitudes to show (degrees, comma separated)</translation>
     </message>
     <message>
       <source>Layer</source>
@@ -171,8 +199,16 @@
       <translation>No layer to export.</translation>
     </message>
     <message>
+      <source>No scale bar written: no latitude could be measured in this projection. First reason: {0}.</source>
+      <translation>No scale bar written: no latitude could be measured in this projection. First reason: {0}.</translation>
+    </message>
+    <message>
       <source>Nothing to export inside the map frame.</source>
       <translation>Nothing to export inside the map frame.</translation>
+    </message>
+    <message>
+      <source>Number of segments</source>
+      <translation>Number of segments</translation>
     </message>
     <message>
       <source>Other layers to name (layer, name field, grouping field)</source>
@@ -185,6 +221,30 @@
     <message>
       <source>SVG file</source>
       <translation>SVG file</translation>
+    </message>
+    <message>
+      <source>Scale bar caption</source>
+      <translation>Scale bar caption</translation>
+    </message>
+    <message>
+      <source>Scale bar position from the left (mm, 0 = automatic)</source>
+      <translation>Scale bar position from the left (mm, 0 = automatic)</translation>
+    </message>
+    <message>
+      <source>Scale bar position from the top (mm, 0 = automatic)</source>
+      <translation>Scale bar position from the top (mm, 0 = automatic)</translation>
+    </message>
+    <message>
+      <source>Scale bar text size (mm)</source>
+      <translation>Scale bar text size (mm)</translation>
+    </message>
+    <message>
+      <source>Scale bar: centre longitude {0}°, measured on {1}.</source>
+      <translation>Scale bar: centre longitude {0}°, measured on {1}.</translation>
+    </message>
+    <message>
+      <source>Segment of {0} {1}: at {2}° it measures {3} mm on the page.</source>
+      <translation>Segment of {0} {1}: at {2}° it measures {3} mm on the page.</translation>
     </message>
     <message>
       <source>Select a map frame in that layout.</source>
@@ -235,6 +295,10 @@
       <translation>class</translation>
     </message>
     <message>
+      <source>measurement refused ({0})</source>
+      <translation>measurement refused ({0})</translation>
+    </message>
+    <message>
       <source>not drawn by the symbology</source>
       <translation>not drawn by the symbology</translation>
     </message>
@@ -245,6 +309,18 @@
     <message>
       <source>reprojection failed</source>
       <translation>reprojection failed</translation>
+    </message>
+    <message>
+      <source>the result has no length</source>
+      <translation>the result has no length</translation>
+    </message>
+    <message>
+      <source>the result, {0} mm, is far wider than the frame: the point falls outside what this projection can express</source>
+      <translation>the result, {0} mm, is far wider than the frame: the point falls outside what this projection can express</translation>
+    </message>
+    <message>
+      <source>the segment spans {0}° of longitude, more than the projection can show in one piece</source>
+      <translation>the segment spans {0}° of longitude, more than the projection can show in one piece</translation>
     </message>
     <message>
       <source>unrepairable geometry</source>

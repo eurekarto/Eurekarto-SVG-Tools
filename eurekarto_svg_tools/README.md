@@ -1,4 +1,4 @@
-# Eurekarto SVG Tools — 1.3.0
+# Eurekarto SVG Tools — 1.3.1
 
 © 2026 Blanche Lambert / Eurêkarto  
 Créé par Blanche Lambert pour Eurêkarto en 2026.  
@@ -8,9 +8,9 @@ Code source et signalement de bugs : https://github.com/eurekarto/Eurekarto-SVG-
 
 ## Installation
 
-**Français** — Dans QGIS 3.40 LTR ou QGIS 4 : **Extensions → Installer/Gérer les extensions → Installer depuis un ZIP**. Sélectionnez `eurekarto_svg_tools-1_3_0.zip`, puis activez l'extension. L'outil apparaît dans le menu **Extensions → Eurekarto SVG Tools**, dans la barre d'outils des extensions, et dans la **boîte à outils de traitements**, fournisseur *Eurekarto SVG Tools*, groupe *Cartographie pour DAO*. Aucun paquet Python supplémentaire n'est nécessaire.
+**Français** — Dans QGIS 3.40 LTR ou QGIS 4 : **Extensions → Installer/Gérer les extensions → Installer depuis un ZIP**. Sélectionnez `eurekarto_svg_tools-1_3_1.zip`, puis activez l'extension. L'outil apparaît dans le menu **Extensions → Eurekarto SVG Tools**, dans la barre d'outils des extensions, et dans la **boîte à outils de traitements**, fournisseur *Eurekarto SVG Tools*, groupe *Cartographie pour DAO*. Aucun paquet Python supplémentaire n'est nécessaire.
 
-**English** — In QGIS 3.40 LTR or QGIS 4, use **Plugins → Manage and Install Plugins → Install from ZIP**, select `eurekarto_svg_tools-1_3_0.zip`, then enable the plugin. The tool appears under **Plugins → Eurekarto SVG Tools**, in the plugins toolbar, and in the **Processing toolbox**, provider *Eurekarto SVG Tools*, group *Cartography for CAD*. No additional Python packages are required.
+**English** — In QGIS 3.40 LTR or QGIS 4, use **Plugins → Manage and Install Plugins → Install from ZIP**, select `eurekarto_svg_tools-1_3_1.zip`, then enable the plugin. The tool appears under **Plugins → Eurekarto SVG Tools**, in the plugins toolbar, and in the **Processing toolbox**, provider *Eurekarto SVG Tools*, group *Cartography for CAD*. No additional Python packages are required.
 
 Le ZIP contient exactement un dossier racine, `eurekarto_svg_tools`. Pour une installation manuelle, copiez ce dossier dans le répertoire `python/plugins` du profil QGIS actif et redémarrez QGIS. L'interface suit la langue de QGIS : française si QGIS est en français, anglaise sinon.
 
@@ -85,6 +85,7 @@ Le journal d'exécution indique les valeurs de calage lues, le nombre de classes
 
 ## Historique
 
+- **1.3.1** — Plus aucune erreur avalée en silence : une emprise sans image dans le SCR de la couche retire le filtre spatial au lieu de ne rien lire, et un rendu qui refuse d'être libéré est signalé. Passe le contrôle de sécurité Bandit du dépôt QGIS.
 - **1.3.0** — Les latitudes absentes de la carte ne reçoivent plus de barre.
 - **1.2.0** — Paramètres regroupés par section dans la fenêtre, réglages fins basculés en avancés, nom de la projection écrit sous la barre d'échelle.
 - **1.1.0** — Barre d'échelle variable optionnelle, écrite dans le même SVG à côté du groupe `carte`.
@@ -96,8 +97,8 @@ Le journal d'exécution indique les valeurs de calage lues, le nombre de classes
 ## Vérifications effectuées
 
 - **Tests unitaires** : 49 tests couvrant le calage (y compris cadre pivoté), l'écriture des tracés, les identifiants XML, la réduction des sommets, la surface minimale, les clés de regroupement, la lecture des styles, la formule de la barre d'échelle contrôlée contre les longueurs géodésiques publiées, et la bonne formation du document SVG. Ils s'exécutent hors QGIS, sur des doublures minimales : `python3 test_svg_export.py`.
-- **Analyse statique** : `pyflakes` et `flake8` (lignes ≤ 100 caractères, complexité ≤ 12) ne signalent rien.
-- **Traductions** : 92 chaînes, générées depuis les appels `tr()` réellement présents dans le code, compilées avec `lrelease` et chargement vérifié ; aucune chaîne manquante ni orpheline, champs de substitution cohérents entre les deux langues.
+- **Analyse statique** : `pyflakes`, `flake8` (lignes ≤ 100 caractères, complexité ≤ 12) et `bandit` — l'analyseur de sécurité utilisé par le dépôt QGIS — ne signalent rien.
+- **Traductions** : 93 chaînes, générées depuis les appels `tr()` réellement présents dans le code, compilées avec `lrelease` et chargement vérifié ; aucune chaîne manquante ni orpheline, champs de substitution cohérents entre les deux langues.
 - **Non vérifié** : l'exécution réelle dans QGIS — renderers, itération sur les entités, rendu raster, compatibilité QGIS 4. À valider sur un projet réel avant diffusion.
 
 ## Publication sur plugins.qgis.org

@@ -82,10 +82,9 @@ def ellipsoid_of(project, crs, context):
     candidates = []
     if project is not None:
         candidates.append(project.ellipsoid())
-    try:
-        candidates.append(crs.ellipsoidAcronym())
-    except (AttributeError, TypeError):
-        pass
+    acronym = getattr(crs, 'ellipsoidAcronym', None)
+    if acronym is not None:
+        candidates.append(acronym())
     candidates.append('WGS84')
     for candidate in candidates:
         if not candidate or candidate == 'NONE':
@@ -173,11 +172,9 @@ class ScaleBar:
             point = self.transform.transform(QgsPointXY(self.longitude, latitude))
         except Exception:
             return False
-        try:
-            if self.writer.mask.contains(point):
-                return True
-        except (AttributeError, TypeError):
-            pass
+        mask = getattr(self.writer, 'mask', None)
+        if mask is not None and mask.contains(point):
+            return True
         return bool(self.writer.extent.contains(point))
 
     def measure(self, latitudes, feedback):

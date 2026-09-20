@@ -319,6 +319,10 @@
       <translation>The map frame outline is invalid.</translation>
     </message>
     <message>
+      <source>The symbology could not be released: {0}</source>
+      <translation>The symbology could not be released: {0}</translation>
+    </message>
+    <message>
       <source>Unnamed</source>
       <translation>Unnamed</translation>
     </message>

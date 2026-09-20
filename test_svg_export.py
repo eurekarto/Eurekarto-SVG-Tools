@@ -134,6 +134,7 @@ def install_stubs():
 
     core.QgsCoordinateReferenceSystem = type('QgsCoordinateReferenceSystem',
                                              (Exception,), {})
+    core.QgsCsException = type('QgsCsException', (Exception,), {})
     core.QgsDistanceArea = type('QgsDistanceArea', (Exception,), {})
     core.QgsProcessingParameterDefinition = types.SimpleNamespace(FlagAdvanced=1)
     core.Qgis.ProcessingParameterFlag = types.SimpleNamespace(Advanced=1)

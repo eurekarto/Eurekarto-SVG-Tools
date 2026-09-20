@@ -18,9 +18,10 @@ from collections import namedtuple
 from qgis.PyQt.QtCore import QBuffer, QIODevice, QSize, QSizeF, Qt
 from qgis.PyQt.QtGui import QColor
 from qgis.core import (
-    Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsExpressionContext,
-    QgsExpressionContextUtils, QgsFeatureRequest, QgsGeometry, QgsLayoutItemMap,
-    QgsLayoutItemRegistry, QgsMapRendererParallelJob, QgsMapSettings, QgsPointXY,
+    Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsCsException,
+    QgsExpressionContext, QgsExpressionContextUtils, QgsFeatureRequest, QgsGeometry,
+    QgsLayoutItemMap, QgsLayoutItemRegistry, QgsMapRendererParallelJob, QgsMapSettings,
+    QgsPointXY,
     QgsProcessing, QgsProcessingAlgorithm, QgsProcessingException,
     QgsProcessingParameterBoolean, QgsProcessingParameterDefinition,
     QgsProcessingParameterField, QgsProcessingParameterFileDestination,
@@ -548,6 +549,15 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
             attributes.append('stroke-opacity="{0}"'.format(number(fill_opacity, 3)))
         return ' '.join(attributes), radius
 
+    @classmethod
+    def marker_radius(cls, symbol, default):
+        """Half the marker size in millimetres, or the default when it has none."""
+        try:
+            size = cls.render_millimetres(symbol.size(), symbol.sizeUnit())
+        except (AttributeError, TypeError):
+            return default
+        return size / 2.0 if size and size > 0 else default
+
     def style_of(self, symbol, geometry_type, default_radius):
         """SVG presentation attributes and point radius read from a QGIS symbol."""
         radius = default_radius
@@ -563,12 +573,7 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         if geometry_type == GEOMETRY_LINE:
             return self.line_style(symbol, colour, fill_opacity, first, radius)
         if geometry_type == GEOMETRY_POINT:
-            try:
-                size = self.render_millimetres(symbol.size(), symbol.sizeUnit())
-                if size and size > 0:
-                    radius = size / 2.0
-            except (AttributeError, TypeError):
-                pass
+            radius = self.marker_radius(symbol, radius)
         no_brush = first is not None and self.brush_is_none(first)
         stroke_colour, stroke_width = self.outline_of(first)
         attributes = (self.fill_attributes(colour, fill_opacity, no_brush)
@@ -734,10 +739,9 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         settings.setOutputSize(QSize(width_px, height_px))
         settings.setOutputDpi(dpi)
         settings.setBackgroundColor(QColor(0, 0, 0, 0))
-        try:
-            settings.setTransformContext(context.transformContext())
-        except (AttributeError, TypeError):
-            pass
+        setter = getattr(settings, 'setTransformContext', None)
+        if setter is not None:
+            setter(context.transformContext())
         job = QgsMapRendererParallelJob(settings)
         job.start()
         job.waitForFinished()
@@ -777,9 +781,10 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         try:
             request.setFilterRect(
                 transform.transformBoundingBox(writer.extent, REVERSE_TRANSFORM))
-        except Exception:
-            # An extent that cannot be expressed in the layer CRS: read it all.
-            pass
+        except QgsCsException:
+            # The frame has no image in the layer CRS: drop the spatial filter and
+            # read every feature rather than silently reading none.
+            request.setFilterRect(QgsRectangle())
         return request, transform
 
     @staticmethod
@@ -926,13 +931,23 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
                                   dropped, stats, unnamed, feedback):
                 canceled = True
         finally:
-            if renderer is not None:
-                try:
-                    renderer.stopRender(render_context)
-                except (AttributeError, TypeError):
-                    pass
+            self.stop_renderer(renderer, render_context, feedback)
         self.report(layer, dropped, stats, feedback)
         return classes, canceled
+
+    @staticmethod
+    def stop_renderer(renderer, render_context, feedback):
+        """Release the renderer, and report a refusal rather than hide it.
+
+        This runs in a finally block, where an escaping exception would mask the
+        one being handled.
+        """
+        if renderer is None:
+            return
+        try:
+            renderer.stopRender(render_context)
+        except Exception as error:
+            feedback.pushInfo(tr('The symbology could not be released: {0}').format(error))
 
     def merge_pending(self, layer, pending, classes, writer, geometry_type, dropped,
                       stats, unnamed, feedback):

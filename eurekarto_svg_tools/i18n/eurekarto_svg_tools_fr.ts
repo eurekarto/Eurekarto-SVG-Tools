@@ -319,6 +319,10 @@
       <translation>Le contour du cadre de carte est invalide.</translation>
     </message>
     <message>
+      <source>The symbology could not be released: {0}</source>
+      <translation>La symbologie n’a pas pu être libérée : {0}</translation>
+    </message>
+    <message>
       <source>Unnamed</source>
       <translation>Sans nom</translation>
     </message>

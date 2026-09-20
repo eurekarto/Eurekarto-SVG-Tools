@@ -2,7 +2,7 @@
 name=Eurekarto SVG Tools
 qgisMinimumVersion=3.40
 qgisMaximumVersion=4.99
-version=1.3.0
+version=1.3.1
 author=Blanche Lambert, Eurêkarto
 email=contact@eurekarto.com
 description=Export a print layout map frame to a grouped, named SVG for Illustrator or Inkscape.
@@ -17,7 +17,8 @@ deprecated=False
 hasProcessingProvider=True
 license=GPL-2.0-or-later
 tags=svg,export,illustrator,inkscape,cartography,layout,cad
-changelog=1.3.0 Latitudes the map does not show no longer get a bar; each one is reported in the log.
+changelog=1.3.1 No error is swallowed in silence any more: an extent with no image in the layer CRS now drops the spatial filter instead of reading nothing, and a renderer that refuses to be released is reported. Clears the Bandit security check of the QGIS plugin repository.
+    1.3.0 Latitudes the map does not show no longer get a bar; each one is reported in the log.
     1.2.0 Parameters grouped by section in the dialog, fine settings moved to the advanced group, and the projection name written under the scale bar.
     1.1.0 Optional variable scale bar written into the same SVG, beside the map group: one bar per latitude, each measured along its own parallel, so a small-scale map keeps an honest scale where a single bar cannot. Distances are computed from the ellipsoid radius of curvature, which also works on sphere-based projections.
     1.0.3 Repository, homepage and tracker declared.

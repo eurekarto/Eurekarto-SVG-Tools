@@ -19,6 +19,10 @@
       <translation>Ajouter une barre d’échelle variable</translation>
     </message>
     <message>
+      <source>Appearance</source>
+      <translation>Apparence</translation>
+    </message>
+    <message>
       <source>Bar height (mm)</source>
       <translation>Hauteur des barres (mm)</translation>
     </message>
@@ -73,6 +77,10 @@
     <message>
       <source>Field holding the names</source>
       <translation>Champ qui porte les noms</translation>
+    </message>
+    <message>
+      <source>Geometry</source>
+      <translation>Géométrie</translation>
     </message>
     <message>
       <source>Give at least one latitude between -85 and 85.</source>
@@ -167,12 +175,20 @@
       <translation>Couche à découper en groupes nommés (ex. les pays)</translation>
     </message>
     <message>
+      <source>Layers</source>
+      <translation>Couches</translation>
+    </message>
+    <message>
       <source>Layers to export (empty = those shown in the frame)</source>
       <translation>Couches à exporter (vide = celles du cadre)</translation>
     </message>
     <message>
       <source>Layout "{0}": page {1} x {2} mm, frame {3} x {4} mm, placement {5}, map rotation {6}°, scale 1:{7}, CRS {8}.</source>
       <translation>Mise en page « {0} » : page {1} x {2} mm, cadre {3} x {4} mm, placement {5}, rotation de la carte {6}°, échelle 1:{7}, SCR {8}.</translation>
+    </message>
+    <message>
+      <source>Map</source>
+      <translation>Carte</translation>
     </message>
     <message>
       <source>Map frame</source>
@@ -195,12 +211,20 @@
       <translation>Champ nom</translation>
     </message>
     <message>
+      <source>Naming</source>
+      <translation>Nommage</translation>
+    </message>
+    <message>
       <source>No layer to export.</source>
       <translation>Aucune couche à exporter.</translation>
     </message>
     <message>
       <source>No scale bar written: no latitude could be measured in this projection. First reason: {0}.</source>
       <translation>Aucune barre d’échelle écrite : aucune latitude n’a pu être mesurée dans cette projection. Première raison : {0}.</translation>
+    </message>
+    <message>
+      <source>Note the projection under the bar</source>
+      <translation>Noter la projection sous la barre</translation>
     </message>
     <message>
       <source>Nothing to export inside the map frame.</source>
@@ -215,12 +239,20 @@
       <translation>Autres couches à nommer (couche, champ nom, champ de regroupement)</translation>
     </message>
     <message>
+      <source>Output</source>
+      <translation>Sortie</translation>
+    </message>
+    <message>
       <source>Print layout</source>
       <translation>Mise en page</translation>
     </message>
     <message>
       <source>SVG file</source>
       <translation>Fichier SVG</translation>
+    </message>
+    <message>
+      <source>Scale bar</source>
+      <translation>Barre d’échelle</translation>
     </message>
     <message>
       <source>Scale bar caption</source>

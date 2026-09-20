@@ -1,4 +1,4 @@
-# Eurekarto SVG Tools — 1.1.0
+# Eurekarto SVG Tools — 1.2.0
 
 © 2026 Blanche Lambert / Eurêkarto  
 Créé par Blanche Lambert pour Eurêkarto en 2026.  
@@ -8,9 +8,9 @@ Code source et signalement de bugs : https://github.com/eurekarto/Eurekarto-SVG-
 
 ## Installation
 
-**Français** — Dans QGIS 3.40 LTR ou QGIS 4 : **Extensions → Installer/Gérer les extensions → Installer depuis un ZIP**. Sélectionnez `eurekarto_svg_tools-1_1_0.zip`, puis activez l'extension. L'outil apparaît dans le menu **Extensions → Eurekarto SVG Tools**, dans la barre d'outils des extensions, et dans la **boîte à outils de traitements**, fournisseur *Eurekarto SVG Tools*, groupe *Cartographie pour DAO*. Aucun paquet Python supplémentaire n'est nécessaire.
+**Français** — Dans QGIS 3.40 LTR ou QGIS 4 : **Extensions → Installer/Gérer les extensions → Installer depuis un ZIP**. Sélectionnez `eurekarto_svg_tools-1_2_0.zip`, puis activez l'extension. L'outil apparaît dans le menu **Extensions → Eurekarto SVG Tools**, dans la barre d'outils des extensions, et dans la **boîte à outils de traitements**, fournisseur *Eurekarto SVG Tools*, groupe *Cartographie pour DAO*. Aucun paquet Python supplémentaire n'est nécessaire.
 
-**English** — In QGIS 3.40 LTR or QGIS 4, use **Plugins → Manage and Install Plugins → Install from ZIP**, select `eurekarto_svg_tools-1_1_0.zip`, then enable the plugin. The tool appears under **Plugins → Eurekarto SVG Tools**, in the plugins toolbar, and in the **Processing toolbox**, provider *Eurekarto SVG Tools*, group *Cartography for CAD*. No additional Python packages are required.
+**English** — In QGIS 3.40 LTR or QGIS 4, use **Plugins → Manage and Install Plugins → Install from ZIP**, select `eurekarto_svg_tools-1_2_0.zip`, then enable the plugin. The tool appears under **Plugins → Eurekarto SVG Tools**, in the plugins toolbar, and in the **Processing toolbox**, provider *Eurekarto SVG Tools*, group *Cartography for CAD*. No additional Python packages are required.
 
 Le ZIP contient exactement un dossier racine, `eurekarto_svg_tools`. Pour une installation manuelle, copiez ce dossier dans le répertoire `python/plugins` du profil QGIS actif et redémarrez QGIS. L'interface suit la langue de QGIS : française si QGIS est en français, anglaise sinon.
 
@@ -32,6 +32,8 @@ Le fichier est écrit en millimètres à la taille de la page, la carte placée 
 L'outil n'exporte **ni étiquettes ni habillage** — le moteur d'étiquetage place le texte au rendu, cette information n'existe pas dans les données. Le mode de travail prévu est donc l'hybride : l'export SVG natif de la mise en page fournit étiquettes et habillage, cette extension fournit les couches vecteur structurées, et les deux fichiers se superposent au millimètre (*Coller sur place*).
 
 ## Paramètres
+
+Les libellés portent leur section en préfixe — **Carte**, **Couches**, **Nommage**, **Apparence**, **Géométrie**, **Barre d'échelle**, **Sortie** — parce que la fenêtre de Processing ne sait pas afficher de titres de section. Les réglages fins sont dans le repli *Paramètres avancés*.
 
 | Paramètre | Rôle |
 |---|---|
@@ -59,7 +61,7 @@ Sur une carte à petite échelle, le facteur d'échelle change d'un endroit à l
 
 Le calcul part du rayon de courbure en grande normale de l'ellipsoïde, et non de `QgsDistanceArea`, qui ne mesure rien du tout lorsqu'il ne parvient pas à résoudre un nom d'ellipsoïde : c'est exactement ce qui arrive avec une projection sur sphère comme les ESRI 53xxx. L'ellipsoïde retenu est celui du projet, sinon celui du SCR de la carte, sinon WGS84, et le journal indique lequel a servi. La formule a été contrôlée contre les longueurs géodésiques publiées du degré de longitude.
 
-Les distances sont mesurées **le long des parallèles**, à la longitude du centre du cadre ; d'où la légende par défaut, à adapter si votre projection appelle une autre formulation. Le bloc est écrit sous un groupe `echelle`, hors du groupe `carte` : ses coordonnées sont des millimètres page, alors que le groupe carte porte le placement du cadre. Les réglages fins — nombre de segments, position, hauteur, taille du texte — sont dans les paramètres avancés.
+Les distances sont mesurées **le long des parallèles**, à la longitude du centre du cadre ; d'où la légende par défaut, à adapter si votre projection appelle une autre formulation. Sous les barres viennent la légende puis, si l'option est cochée, le nom de la projection suivi de son code — « Sphere Equal Earth Greenwich (ESRI:53036) » — car une barre variable n'a de sens qu'avec la projection à laquelle elle se rapporte. Le bloc est écrit sous un groupe `echelle`, hors du groupe `carte` : ses coordonnées sont des millimètres page, alors que le groupe carte porte le placement du cadre. Les réglages fins — nombre de segments, position, hauteur, taille du texte — sont dans les paramètres avancés.
 
 ## Tracés trop denses pour Illustrator
 
@@ -83,6 +85,7 @@ Le journal d'exécution indique les valeurs de calage lues, le nombre de classes
 
 ## Historique
 
+- **1.2.0** — Paramètres regroupés par section dans la fenêtre, réglages fins basculés en avancés, nom de la projection écrit sous la barre d'échelle.
 - **1.1.0** — Barre d'échelle variable optionnelle, écrite dans le même SVG à côté du groupe `carte`.
 - **1.0.3** — Dépôt, page d'accueil et suivi des bugs déclarés dans les métadonnées.
 - **1.0.2** — Revue de code : placement du groupe carte par la transformation de scène du cadre (un cadre pivoté se plaçait au mauvais endroit), icône de barre d'outils de nouveau enregistrée, accès aux énumérations compatible Qt 5 et Qt 6, test du type de couche par classe plutôt que par une énumération obsolète, 33 tests unitaires.
@@ -91,9 +94,10 @@ Le journal d'exécution indique les valeurs de calage lues, le nombre de classes
 
 ## Vérifications effectuées
 
-- **Tests unitaires** : 40 tests couvrant le calage (y compris cadre pivoté), l'écriture des tracés, les identifiants XML, la réduction des sommets, la surface minimale, les clés de regroupement, la lecture des styles, la formule de la barre d'échelle contrôlée contre les longueurs géodésiques publiées, et la bonne formation du document SVG. Ils s'exécutent hors QGIS, sur des doublures minimales : `python3 test_svg_export.py`.
+- **Tests unitaires** : 45 tests couvrant le calage (y compris cadre pivoté), l'écriture des tracés, les identifiants XML, la réduction des sommets, la surface minimale, les clés de regroupement, la lecture des styles, la formule de la barre d'échelle contrôlée contre les longueurs géodésiques publiées, et la bonne formation du document SVG. Ils s'exécutent hors QGIS, sur des doublures minimales : `python3 test_svg_export.py`.
 - **Analyse statique** : `pyflakes` et `flake8` (lignes ≤ 100 caractères, complexité ≤ 12) ne signalent rien.
-- **Traductions** : 81 chaînes, générées depuis les appels `tr()` réellement présents dans le code, compilées avec `lrelease` et chargement vérifié ; aucune chaîne manquante ni orpheline, champs de substitution cohérents entre les deux langues.
+- **Traductions** : 89 chaînes, générées depuis les appels `tr()` réellement présents dans le code, compilées avec `lrelease` et chargement vérifié ; aucune chaîne manquante ni orpheline, champs de substitution cohérents entre les deux langues.
+- **Non vérifié** : l'exécution réelle dans QGIS — renderers, itération sur les entités, rendu raster, compatibilité QGIS 4. À valider sur un projet réel avant diffusion.
 
 ## Publication sur plugins.qgis.org
 

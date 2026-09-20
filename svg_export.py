@@ -271,6 +271,15 @@ class FrameWriter:
         return self.point_pieces(geometry, radius), 0
 
 
+def section(name, label):
+    """Prefix a parameter label with its section.
+
+    The Processing dialog has no section headers, so repeating the section name
+    on each label is what visually groups the rows.
+    """
+    return '{0} · {1}'.format(name, label)
+
+
 class ExportLayoutSvg(QgsProcessingAlgorithm):
     LAYOUT = 'LAYOUT'
     MAP_ITEM = 'MAP_ITEM'
@@ -297,6 +306,7 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
     SCALE_Y = 'SCALE_Y'
     SCALE_HEIGHT = 'SCALE_HEIGHT'
     SCALE_FONT = 'SCALE_FONT'
+    SCALE_PROJECTION = 'SCALE_PROJECTION'
     OUTPUT = 'OUTPUT'
 
     def name(self):
@@ -348,83 +358,98 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
             'simplified and every feature dropped, by cause.</p>')
 
     def initAlgorithm(self, config=None):
+        card, layers, naming = tr('Map'), tr('Layers'), tr('Naming')
+        look, shapes, bar, output = (tr('Appearance'), tr('Geometry'), tr('Scale bar'),
+                                     tr('Output'))
         self.addParameter(QgsProcessingParameterLayout(
-            self.LAYOUT, tr('Print layout')))
+            self.LAYOUT, section(card, tr('Print layout'))))
         self.addParameter(QgsProcessingParameterLayoutItem(
-            self.MAP_ITEM, tr('Map frame'), parentLayoutParameterName=self.LAYOUT,
-            itemType=LAYOUT_MAP_ITEM))
+            self.MAP_ITEM, section(card, tr('Map frame')),
+            parentLayoutParameterName=self.LAYOUT, itemType=LAYOUT_MAP_ITEM))
         self.addParameter(QgsProcessingParameterMultipleLayers(
-            self.LAYERS, tr('Layers to export (empty = those shown in the frame)'),
+            self.LAYERS,
+            section(layers, tr('Layers to export (empty = those shown in the frame)')),
             VECTOR_ANY_GEOMETRY, optional=True))
         self.addParameter(QgsProcessingParameterVectorLayer(
-            self.GROUP_LAYER, tr('Layer to split into named groups (e.g. countries)'),
+            self.GROUP_LAYER,
+            section(naming, tr('Layer to split into named groups (e.g. countries)')),
             optional=True))
         self.addParameter(QgsProcessingParameterField(
-            self.GROUP_NAME_FIELD, tr('Field holding the names'),
+            self.GROUP_NAME_FIELD, section(naming, tr('Field holding the names')),
             parentLayerParameterName=self.GROUP_LAYER, optional=True))
         self.addParameter(QgsProcessingParameterField(
-            self.GROUP_JOIN_FIELD, tr('Field grouping the polygons (e.g. ISO code)'),
+            self.GROUP_JOIN_FIELD,
+            section(naming, tr('Field grouping the polygons (e.g. ISO code)')),
             parentLayerParameterName=self.GROUP_LAYER, optional=True))
         self.addParameter(QgsProcessingParameterMatrix(
-            self.NAMING, tr('Other layers to name (layer, name field, grouping field)'),
+            self.NAMING,
+            section(naming, tr('Other layers to name (layer, name field, grouping field)')),
             numberRows=1,
             headers=[tr('Layer'), tr('Name field'), tr('Grouping field')],
             defaultValue=['', '', ''], optional=True))
         self.addParameter(QgsProcessingParameterBoolean(
-            self.STYLE, tr('Keep the colours and classes from QGIS'), defaultValue=True))
+            self.STYLE, section(look, tr('Keep the colours and classes from QGIS')),
+            defaultValue=True))
         self.addParameter(QgsProcessingParameterBoolean(
-            self.RASTERS, tr('Embed images (rasters)'), defaultValue=True))
+            self.RASTERS, section(look, tr('Embed images (rasters)')), defaultValue=True))
         self.addParameter(QgsProcessingParameterNumber(
-            self.RASTER_DPI, tr('Image resolution (DPI)'), PARAMETER_INTEGER,
-            defaultValue=200, minValue=36, maxValue=1200))
+            self.RASTER_DPI, section(look, tr('Image resolution (DPI)')),
+            PARAMETER_INTEGER, defaultValue=200, minValue=36, maxValue=1200))
         self.addParameter(QgsProcessingParameterBoolean(
-            self.CLIP, tr('Cut at the frame edge'), defaultValue=True))
+            self.CLIP, section(shapes, tr('Cut at the frame edge')), defaultValue=True))
         self.addParameter(QgsProcessingParameterNumber(
-            self.MIN_AREA, tr('Minimum polygon area (mm² on the page)'),
+            self.MIN_AREA, section(shapes, tr('Minimum polygon area (mm² on the page)')),
             PARAMETER_DOUBLE, defaultValue=0.05, minValue=0))
         self.addParameter(QgsProcessingParameterNumber(
-            self.PRECISION, tr('Coordinate precision (decimals)'), PARAMETER_INTEGER,
-            defaultValue=3, minValue=0, maxValue=9))
-        self.addParameter(QgsProcessingParameterNumber(
-            self.POINT_RADIUS, tr('Default point size (mm)'), PARAMETER_DOUBLE,
-            defaultValue=0.8, minValue=0.01))
-        self.addParameter(QgsProcessingParameterBoolean(
-            self.SPLIT_PARTS, tr('Separate islands into distinct paths'),
-            defaultValue=False))
-        self.addParameter(QgsProcessingParameterNumber(
-            self.MAX_VERTICES, tr('Maximum vertices per shape (0 = no limit)'),
+            self.MAX_VERTICES, section(shapes, tr('Maximum vertices per shape (0 = no limit)')),
             PARAMETER_INTEGER, defaultValue=10000, minValue=0, maxValue=10000000))
         self.addParameter(QgsProcessingParameterBoolean(
-            self.SCALE_BAR, tr('Add a variable scale bar'), defaultValue=False))
+            self.SCALE_BAR, section(bar, tr('Add a variable scale bar')), defaultValue=False))
         self.addParameter(QgsProcessingParameterString(
-            self.SCALE_LATITUDES, tr('Latitudes to show (degrees, comma separated)'),
+            self.SCALE_LATITUDES,
+            section(bar, tr('Latitudes to show (degrees, comma separated)')),
             defaultValue='0, 30, 45, 60, 75'))
         self.addParameter(QgsProcessingParameterNumber(
-            self.SCALE_DISTANCE, tr('Distance per segment in kilometres (0 = automatic)'),
+            self.SCALE_DISTANCE,
+            section(bar, tr('Distance per segment in kilometres (0 = automatic)')),
             PARAMETER_DOUBLE, defaultValue=0, minValue=0))
         self.addParameter(QgsProcessingParameterString(
-            self.SCALE_CAPTION, tr('Scale bar caption'),
+            self.SCALE_CAPTION, section(bar, tr('Scale bar caption')),
             defaultValue=tr('Distances along parallels'), optional=True))
+        self.addParameter(QgsProcessingParameterBoolean(
+            self.SCALE_PROJECTION, section(bar, tr('Note the projection under the bar')),
+            defaultValue=True))
+        self.addParameter(QgsProcessingParameterFileDestination(
+            self.OUTPUT, section(output, tr('SVG file')), fileFilter='SVG (*.svg)'))
         for parameter in (
                 QgsProcessingParameterNumber(
-                    self.SCALE_SEGMENTS, tr('Number of segments'), PARAMETER_INTEGER,
-                    defaultValue=2, minValue=1, maxValue=10),
+                    self.PRECISION, section(shapes, tr('Coordinate precision (decimals)')),
+                    PARAMETER_INTEGER, defaultValue=3, minValue=0, maxValue=9),
                 QgsProcessingParameterNumber(
-                    self.SCALE_X, tr('Scale bar position from the left (mm, 0 = automatic)'),
+                    self.POINT_RADIUS, section(shapes, tr('Default point size (mm)')),
+                    PARAMETER_DOUBLE, defaultValue=0.8, minValue=0.01),
+                QgsProcessingParameterBoolean(
+                    self.SPLIT_PARTS, section(shapes, tr('Separate islands into distinct paths')),
+                    defaultValue=False),
+                QgsProcessingParameterNumber(
+                    self.SCALE_SEGMENTS, section(bar, tr('Number of segments')),
+                    PARAMETER_INTEGER, defaultValue=2, minValue=1, maxValue=10),
+                QgsProcessingParameterNumber(
+                    self.SCALE_X,
+                    section(bar, tr('Scale bar position from the left (mm, 0 = automatic)')),
                     PARAMETER_DOUBLE, defaultValue=0, minValue=0),
                 QgsProcessingParameterNumber(
-                    self.SCALE_Y, tr('Scale bar position from the top (mm, 0 = automatic)'),
+                    self.SCALE_Y,
+                    section(bar, tr('Scale bar position from the top (mm, 0 = automatic)')),
                     PARAMETER_DOUBLE, defaultValue=0, minValue=0),
                 QgsProcessingParameterNumber(
-                    self.SCALE_HEIGHT, tr('Bar height (mm)'), PARAMETER_DOUBLE,
-                    defaultValue=2.0, minValue=0.2),
+                    self.SCALE_HEIGHT, section(bar, tr('Bar height (mm)')),
+                    PARAMETER_DOUBLE, defaultValue=2.0, minValue=0.2),
                 QgsProcessingParameterNumber(
-                    self.SCALE_FONT, tr('Scale bar text size (mm)'), PARAMETER_DOUBLE,
-                    defaultValue=2.5, minValue=0.5)):
+                    self.SCALE_FONT, section(bar, tr('Scale bar text size (mm)')),
+                    PARAMETER_DOUBLE, defaultValue=2.5, minValue=0.5)):
             parameter.setFlags(parameter.flags() | ADVANCED_PARAMETER)
             self.addParameter(parameter)
-        self.addParameter(QgsProcessingParameterFileDestination(
-            self.OUTPUT, tr('SVG file'), fileFilter='SVG (*.svg)'))
 
     # ------------------------------------------------------------------ symbology
 
@@ -1011,6 +1036,15 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         lines.append('</svg>')
         return '\n'.join(lines) + '\n'
 
+    @staticmethod
+    def projection_name(crs):
+        """The projection as a reader needs it: its name, then its code."""
+        description = (crs.description() or '').strip()
+        authid = (crs.authid() or '').strip()
+        if description and authid:
+            return '{0} ({1})'.format(description, authid)
+        return description or authid or ''
+
     def scale_bar_of(self, parameters, context, item, writer, frame, feedback):
         """The scale bar block and its style, or ([], '') when it is not wanted."""
         if not self.parameterAsBool(parameters, self.SCALE_BAR, context):
@@ -1039,7 +1073,10 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         major, minor, name = ellipsoid_of(context.project(), frame['crs'], context)
         feedback.pushInfo(tr('Scale bar: centre longitude {0}°, measured on {1}.').format(
             number(longitude, 4), name))
-        bar = ScaleBar(options, (major, minor), longitude, to_map, writer)
+        footer = [options.caption]
+        if self.parameterAsBool(parameters, self.SCALE_PROJECTION, context):
+            footer.append(self.projection_name(frame['crs']))
+        bar = ScaleBar(options, (major, minor), longitude, to_map, writer, footer)
         block = bar.build(frame['page'], latitudes, feedback)
         return block, bar.style(options.font) if block else ''
 

@@ -122,12 +122,14 @@ def delta_longitude(distance, latitude, major, minor):
 class ScaleBar:
     """Builds the SVG of a variable scale bar, in page millimetres."""
 
-    def __init__(self, options, ellipsoid, longitude, transform, writer):
+    def __init__(self, options, ellipsoid, longitude, transform, writer, footer=()):
         self.options = options
         self.ellipsoid = ellipsoid
         self.longitude = longitude
         self.transform = transform
         self.writer = writer
+        # Caption, then the projection name: one line each, under the bars.
+        self.footer = [line for line in footer if line]
 
     def page_length(self, latitude, metres):
         """Millimetres on the page for a real distance along that parallel.
@@ -184,9 +186,11 @@ class ScaleBar:
         gap = font * 0.4
         block = rows * (height + gap)
         left = self.options.x if self.options.x > 0 else 15.0 + font * 2.5
-        top = self.options.y if self.options.y > 0 else page[1] - 15.0 - block
+        footer = len(self.footer) * font * 1.3
+        top = (self.options.y if self.options.y > 0
+               else page[1] - 15.0 - block - footer)
         return {'left': left, 'top': top, 'height': height, 'gap': gap, 'font': font,
-                'caption_y': top + block + font * 0.9}
+                'footer_y': top + block + font * 0.9}
 
     @staticmethod
     def identifier(latitude):
@@ -248,10 +252,12 @@ class ScaleBar:
         block.extend(self.tick_labels(lengths[0][1], metres, geometry))
         for index, (latitude, length) in enumerate(lengths):
             block.extend(self.bar_row(index, latitude, length, geometry))
-        if self.options.caption:
-            block.append('<text id="legende" x="{0}" y="{1}">{2}</text>'.format(
-                number(geometry['left'], 3), number(geometry['caption_y'], 3),
-                xml_text(self.options.caption)))
+        for index, line in enumerate(self.footer):
+            block.append('<text id="{0}" x="{1}" y="{2}">{3}</text>'.format(
+                'legende' if index == 0 else 'legende_{0}'.format(index + 1),
+                number(geometry['left'], 3),
+                number(geometry['footer_y'] + index * geometry['font'] * 1.3, 3),
+                xml_text(line)))
         block.append('</g>')
         return block
 

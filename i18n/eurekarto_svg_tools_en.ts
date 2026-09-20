@@ -19,6 +19,10 @@
       <translation>Add a variable scale bar</translation>
     </message>
     <message>
+      <source>Appearance</source>
+      <translation>Appearance</translation>
+    </message>
+    <message>
       <source>Bar height (mm)</source>
       <translation>Bar height (mm)</translation>
     </message>
@@ -73,6 +77,10 @@
     <message>
       <source>Field holding the names</source>
       <translation>Field holding the names</translation>
+    </message>
+    <message>
+      <source>Geometry</source>
+      <translation>Geometry</translation>
     </message>
     <message>
       <source>Give at least one latitude between -85 and 85.</source>
@@ -167,12 +175,20 @@
       <translation>Layer to split into named groups (e.g. countries)</translation>
     </message>
     <message>
+      <source>Layers</source>
+      <translation>Layers</translation>
+    </message>
+    <message>
       <source>Layers to export (empty = those shown in the frame)</source>
       <translation>Layers to export (empty = those shown in the frame)</translation>
     </message>
     <message>
       <source>Layout "{0}": page {1} x {2} mm, frame {3} x {4} mm, placement {5}, map rotation {6}°, scale 1:{7}, CRS {8}.</source>
       <translation>Layout "{0}": page {1} x {2} mm, frame {3} x {4} mm, placement {5}, map rotation {6}°, scale 1:{7}, CRS {8}.</translation>
+    </message>
+    <message>
+      <source>Map</source>
+      <translation>Map</translation>
     </message>
     <message>
       <source>Map frame</source>
@@ -195,12 +211,20 @@
       <translation>Name field</translation>
     </message>
     <message>
+      <source>Naming</source>
+      <translation>Naming</translation>
+    </message>
+    <message>
       <source>No layer to export.</source>
       <translation>No layer to export.</translation>
     </message>
     <message>
       <source>No scale bar written: no latitude could be measured in this projection. First reason: {0}.</source>
       <translation>No scale bar written: no latitude could be measured in this projection. First reason: {0}.</translation>
+    </message>
+    <message>
+      <source>Note the projection under the bar</source>
+      <translation>Note the projection under the bar</translation>
     </message>
     <message>
       <source>Nothing to export inside the map frame.</source>
@@ -215,12 +239,20 @@
       <translation>Other layers to name (layer, name field, grouping field)</translation>
     </message>
     <message>
+      <source>Output</source>
+      <translation>Output</translation>
+    </message>
+    <message>
       <source>Print layout</source>
       <translation>Print layout</translation>
     </message>
     <message>
       <source>SVG file</source>
       <translation>SVG file</translation>
+    </message>
+    <message>
+      <source>Scale bar</source>
+      <translation>Scale bar</translation>
     </message>
     <message>
       <source>Scale bar caption</source>

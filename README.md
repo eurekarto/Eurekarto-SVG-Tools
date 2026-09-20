@@ -99,7 +99,3 @@ Le journal d'exécution indique les valeurs de calage lues, le nombre de classes
 - **Analyse statique** : `pyflakes` et `flake8` (lignes ≤ 100 caractères, complexité ≤ 12) ne signalent rien.
 - **Traductions** : 92 chaînes, générées depuis les appels `tr()` réellement présents dans le code, compilées avec `lrelease` et chargement vérifié ; aucune chaîne manquante ni orpheline, champs de substitution cohérents entre les deux langues.
 - **Non vérifié** : l'exécution réelle dans QGIS — renderers, itération sur les entités, rendu raster, compatibilité QGIS 4. À valider sur un projet réel avant diffusion.
-
-## Publication sur plugins.qgis.org
-
-Les champs exigés par le dépôt officiel sont renseignés : `name`, `qgisMinimumVersion`, `description`, `about`, `version`, `author`, `email`, `repository`, et le fichier `LICENSE` est présent. Le dépôt doit être public au moment de la validation. L'auteur déclaré est repris d'Eurekarto Projection Tools ; à corriger si l'attribution diffère.

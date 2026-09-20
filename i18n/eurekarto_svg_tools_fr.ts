@@ -1,0 +1,254 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TS version="2.1" language="fr" sourcelanguage="en">
+  <context>
+    <name>EurekartoSvgTools</name>
+    <message>
+      <source>, grouped on {0}</source>
+      <translation>, regroupées sur {0}</translation>
+    </message>
+    <message>
+      <source>&lt;p&gt;Writes a whole map frame to one SVG file: one group per layer, in map order, ready to open in Illustrator or Inkscape.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Named groups.&lt;/b&gt; Choose a layer and the field that names its features — each value becomes a named group, so countries arrive as "France", "Spain" and so on instead of anonymous paths. The grouping field (optional) merges the polygons sharing a value into a single shape: with an ISO code, a country and its islands become one object. Codes are compared without case or spaces, and no-data codes (-99, N/A, NULL) fall back to the name, so unrelated territories stay apart. Use the table below for further layers.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Colours.&lt;/b&gt; Fills, outlines and widths are read from the layer symbology, and each class of a categorized or graduated layer becomes its own group named after its legend label, with named features nested inside. Layers with no outline in QGIS get none here. Only the first level of each symbol is read, so hatches, gradients and marker shapes come out as plain fills to restyle. Rasters are rendered by QGIS and embedded as images.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Alignment.&lt;/b&gt; The file is written in millimetres at the page size, with the map placed where the frame sits, so it can be pasted in place over the layout own SVG export — which carries the labels and the page furniture this algorithm does not export. Geometries are repaired and cut at the frame edge, so the file holds no clipping mask.&lt;/p&gt;&lt;p&gt;Shapes holding more vertices than the limit are simplified, because Illustrator does not open very dense paths. The log reports the alignment values it read, the classes and groups written, the shapes simplified and every feature dropped, by cause.&lt;/p&gt;</source>
+      <translation>&lt;p&gt;Écrit tout un cadre de carte dans un seul fichier SVG : un groupe par couche, dans l’ordre de la carte, prêt à ouvrir dans Illustrator ou Inkscape.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Groupes nommés.&lt;/b&gt; Choisissez une couche et le champ qui nomme ses entités : chaque valeur devient un groupe portant ce nom, et les pays arrivent en « France », « Espagne » plutôt qu’en tracés anonymes. Le champ de regroupement (facultatif) réunit en une seule forme les polygones qui partagent une valeur : avec un code ISO, un pays et ses îles ne font plus qu’un objet. Les codes sont comparés sans tenir compte de la casse ni des espaces, et les codes sans valeur (-99, N/A, NULL) retombent sur le nom, pour que des territoires sans rapport ne soient pas réunis. Le tableau en dessous sert aux autres couches.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Couleurs.&lt;/b&gt; Remplissages, contours et épaisseurs sont lus dans la symbologie, et chaque classe d’une couche catégorisée ou graduée forme son propre groupe, nommé d’après son libellé de légende, avec les entités nommées à l’intérieur. Une couche sans contour dans QGIS n’en a pas non plus ici. Seul le premier niveau de chaque symbole est lu : hachures, dégradés et formes de marqueurs ressortent en aplats simples, à rhabiller. Les rasters sont dessinés par QGIS et intégrés en images.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Calage.&lt;/b&gt; Le fichier est écrit en millimètres à la taille de la page, la carte placée là où se trouve le cadre : il se colle sur place par-dessus l’export SVG de la mise en page, qui porte les étiquettes et l’habillage que cet algorithme n’exporte pas. Les géométries sont réparées et coupées au bord du cadre, donc le fichier ne contient aucun masque d’écrêtage.&lt;/p&gt;&lt;p&gt;Les formes qui comptent plus de sommets que la limite sont simplifiées, parce qu’Illustrator n’ouvre pas les tracés très denses. Le journal indique les valeurs de calage lues, les classes et groupes écrits, les formes simplifiées et chaque entité écartée, avec sa raison.&lt;/p&gt;</translation>
+    </message>
+    <message>
+      <source>About</source>
+      <translation>À propos</translation>
+    </message>
+    <message>
+      <source>Canceled: {0} is incomplete — check which layers it holds.</source>
+      <translation>Annulé : {0} est incomplet — vérifiez les couches qu’il contient.</translation>
+    </message>
+    <message>
+      <source>Cartography for CAD</source>
+      <translation>Cartographie pour DAO</translation>
+    </message>
+    <message>
+      <source>Choose a name field, a grouping field, or both, for layer "{0}".</source>
+      <translation>Choisissez un champ nom, un champ de regroupement, ou les deux, pour la couche « {0} ».</translation>
+    </message>
+    <message>
+      <source>Coordinate precision (decimals)</source>
+      <translation>Précision des coordonnées (décimales)</translation>
+    </message>
+    <message>
+      <source>Could not read the area shown by the map frame.</source>
+      <translation>Impossible de lire la zone affichée par le cadre de carte.</translation>
+    </message>
+    <message>
+      <source>Created by Blanche Lambert for Eurêkarto in 2026.</source>
+      <translation>Créé par Blanche Lambert pour Eurêkarto en 2026.</translation>
+    </message>
+    <message>
+      <source>Cut at the frame edge</source>
+      <translation>Couper au bord du cadre</translation>
+    </message>
+    <message>
+      <source>Default point size (mm)</source>
+      <translation>Taille des points par défaut (mm)</translation>
+    </message>
+    <message>
+      <source>Embed images (rasters)</source>
+      <translation>Intégrer les images (rasters)</translation>
+    </message>
+    <message>
+      <source>Field grouping the polygons (e.g. ISO code)</source>
+      <translation>Champ qui regroupe les polygones (ex. code ISO)</translation>
+    </message>
+    <message>
+      <source>Field holding the names</source>
+      <translation>Champ qui porte les noms</translation>
+    </message>
+    <message>
+      <source>Grouping field</source>
+      <translation>Champ de regroupement</translation>
+    </message>
+    <message>
+      <source>Image resolution (DPI)</source>
+      <translation>Résolution des images (DPI)</translation>
+    </message>
+    <message>
+      <source>Keep the colours and classes from QGIS</source>
+      <translation>Garder les couleurs et les classes de QGIS</translation>
+    </message>
+    <message>
+      <source>Layer</source>
+      <translation>Couche</translation>
+    </message>
+    <message>
+      <source>Layer "{0}" embedded as an image, {1} x {2} px, {3} KB.</source>
+      <translation>Couche « {0} » intégrée en image, {1} x {2} px, {3} Ko.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}" has no field "{1}". Available fields: {2}.</source>
+      <translation>La couche « {0} » n’a pas de champ « {1} ». Champs disponibles : {2}.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}" has nothing inside the frame.</source>
+      <translation>La couche « {0} » n’a rien dans le cadre.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}" holds no polygons: grouping ignored.</source>
+      <translation>La couche « {0} » ne contient pas de polygones : regroupement ignoré.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}" is hidden at this scale.</source>
+      <translation>La couche « {0} » est masquée à cette échelle.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}" is not a vector layer and was skipped.</source>
+      <translation>La couche « {0} » n’est pas vectorielle : ignorée.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}" is not among the exported layers. Available: {1}.</source>
+      <translation>La couche « {0} » ne fait pas partie des couches exportées. Disponibles : {1}.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}" produced no image.</source>
+      <translation>La couche « {0} » n’a produit aucune image.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}" would render as {1} x {2} pixels: lower the image resolution.</source>
+      <translation>La couche « {0} » ferait {1} x {2} pixels : baissez la résolution des images.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}": could not encode the image.</source>
+      <translation>Couche « {0} » : encodage de l’image impossible.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}": dropped {1}.</source>
+      <translation>Couche « {0} » : écartées, {1}.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}": value {1} covers several names ({2}); the first is used.</source>
+      <translation>Couche « {0} » : la valeur {1} couvre plusieurs noms ({2}) ; le premier est retenu.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}": {1} classes, {2} named groups{3}.</source>
+      <translation>Couche « {0} » : {1} classes, {2} groupes nommés{3}.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}": {1} shapes simplified, tolerance up to {2} mm.</source>
+      <translation>Couche « {0} » : {1} formes simplifiées, tolérance jusqu’à {2} mm.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}": {1} shapes still exceed the vertex limit.</source>
+      <translation>Couche « {0} » : {1} formes dépassent encore la limite de sommets.</translation>
+    </message>
+    <message>
+      <source>Layer to split into named groups (e.g. countries)</source>
+      <translation>Couche à découper en groupes nommés (ex. les pays)</translation>
+    </message>
+    <message>
+      <source>Layers to export (empty = those shown in the frame)</source>
+      <translation>Couches à exporter (vide = celles du cadre)</translation>
+    </message>
+    <message>
+      <source>Layout "{0}": page {1} x {2} mm, frame {3} x {4} mm, placement {5}, map rotation {6}°, scale 1:{7}, CRS {8}.</source>
+      <translation>Mise en page « {0} » : page {1} x {2} mm, cadre {3} x {4} mm, placement {5}, rotation de la carte {6}°, échelle 1:{7}, SCR {8}.</translation>
+    </message>
+    <message>
+      <source>Map frame</source>
+      <translation>Cadre de carte</translation>
+    </message>
+    <message>
+      <source>Map to grouped SVG</source>
+      <translation>Carte vers SVG groupé</translation>
+    </message>
+    <message>
+      <source>Maximum vertices per shape (0 = no limit)</source>
+      <translation>Nombre maximal de sommets par forme (0 = sans limite)</translation>
+    </message>
+    <message>
+      <source>Minimum polygon area (mm² on the page)</source>
+      <translation>Surface minimale des polygones (mm² sur la page)</translation>
+    </message>
+    <message>
+      <source>Name field</source>
+      <translation>Champ nom</translation>
+    </message>
+    <message>
+      <source>No layer to export.</source>
+      <translation>Aucune couche à exporter.</translation>
+    </message>
+    <message>
+      <source>Nothing to export inside the map frame.</source>
+      <translation>Rien à exporter à l’intérieur du cadre de carte.</translation>
+    </message>
+    <message>
+      <source>Other layers to name (layer, name field, grouping field)</source>
+      <translation>Autres couches à nommer (couche, champ nom, champ de regroupement)</translation>
+    </message>
+    <message>
+      <source>Print layout</source>
+      <translation>Mise en page</translation>
+    </message>
+    <message>
+      <source>SVG file</source>
+      <translation>Fichier SVG</translation>
+    </message>
+    <message>
+      <source>Select a map frame in that layout.</source>
+      <translation>Choisissez un cadre de carte dans cette mise en page.</translation>
+    </message>
+    <message>
+      <source>Select a print layout.</source>
+      <translation>Choisissez une mise en page.</translation>
+    </message>
+    <message>
+      <source>Separate islands into distinct paths</source>
+      <translation>Séparer les îles en tracés distincts</translation>
+    </message>
+    <message>
+      <source>The map frame has no coordinate reference system.</source>
+      <translation>Le cadre de carte n’a pas de système de coordonnées.</translation>
+    </message>
+    <message>
+      <source>The map frame has no size.</source>
+      <translation>Le cadre de carte n’a pas de dimensions.</translation>
+    </message>
+    <message>
+      <source>The map frame is degenerate.</source>
+      <translation>Le cadre de carte est dégénéré.</translation>
+    </message>
+    <message>
+      <source>The map frame is not on a page.</source>
+      <translation>Le cadre de carte n’est sur aucune page.</translation>
+    </message>
+    <message>
+      <source>The map frame outline is invalid.</source>
+      <translation>Le contour du cadre de carte est invalide.</translation>
+    </message>
+    <message>
+      <source>Unnamed</source>
+      <translation>Sans nom</translation>
+    </message>
+    <message>
+      <source>Written to {0}.</source>
+      <translation>Écrit dans {0}.</translation>
+    </message>
+    <message>
+      <source>below the minimum area</source>
+      <translation>sous la surface minimale</translation>
+    </message>
+    <message>
+      <source>class</source>
+      <translation>classe</translation>
+    </message>
+    <message>
+      <source>not drawn by the symbology</source>
+      <translation>non dessinées par la symbologie</translation>
+    </message>
+    <message>
+      <source>outside the frame</source>
+      <translation>hors du cadre</translation>
+    </message>
+    <message>
+      <source>reprojection failed</source>
+      <translation>reprojection impossible</translation>
+    </message>
+    <message>
+      <source>unrepairable geometry</source>
+      <translation>géométrie irréparable</translation>
+    </message>
+  </context>
+</TS>

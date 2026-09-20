@@ -1,0 +1,23 @@
+[general]
+name=Eurekarto SVG Tools
+qgisMinimumVersion=3.40
+qgisMaximumVersion=4.99
+version=1.0.3
+author=Blanche Lambert / Eurêkarto
+email=contact@eurekarto.com
+description=Export a print layout map frame to a grouped, named SVG for Illustrator or Inkscape.
+about=Created by Blanche Lambert for Eurêkarto in 2026. Writes a map frame to one SVG file with a group per layer, a group per symbology class and a named group per feature, polygons optionally joined on an identifier field such as an ISO code. English and French interfaces. Copyright © 2026 Blanche Lambert / Eurêkarto. GNU GPL v2 or later.
+homepage=https://github.com/eurekarto/Eurekarto-SVG-Tools
+repository=https://github.com/eurekarto/Eurekarto-SVG-Tools
+tracker=https://github.com/eurekarto/Eurekarto-SVG-Tools/issues
+category=Vector
+icon=img/icon.png
+experimental=False
+deprecated=False
+hasProcessingProvider=True
+license=GPL-2.0-or-later
+tags=svg,export,illustrator,inkscape,cartography,layout,cad
+changelog=1.0.3 Repository, homepage and tracker declared.
+    1.0.2 Review pass: the map group is now placed by the frame scene transform, so a rotated frame lands where QGIS draws it; the toolbar icon is registered again; enum access works on both Qt 5 and Qt 6; layer type is tested by class rather than by a deprecated enum; 33 unit tests added.
+    1.0.1 Automatic vertex reduction for shapes above a limit (default 10000), so Illustrator no longer drops very dense paths; simplification tolerance is set in millimetres on the page and reported in the log.
+    1.0.0 First release.

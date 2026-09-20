@@ -99,6 +99,10 @@
       <translation>Garder les couleurs et les classes de QGIS</translation>
     </message>
     <message>
+      <source>Latitude {0}° is not on the map: no bar for it.</source>
+      <translation>La latitude {0}° n’est pas sur la carte : pas de barre pour elle.</translation>
+    </message>
+    <message>
       <source>Latitude {0}° skipped: {1}.</source>
       <translation>Latitude {0}° ignorée : {1}.</translation>
     </message>
@@ -235,6 +239,10 @@
       <translation>Nombre de segments</translation>
     </message>
     <message>
+      <source>Only latitudes shown on the map</source>
+      <translation>Seulement les latitudes présentes sur la carte</translation>
+    </message>
+    <message>
       <source>Other layers to name (layer, name field, grouping field)</source>
       <translation>Autres couches à nommer (couche, champ nom, champ de regroupement)</translation>
     </message>
@@ -329,6 +337,10 @@
     <message>
       <source>measurement refused ({0})</source>
       <translation>mesure refusée ({0})</translation>
+    </message>
+    <message>
+      <source>none of the latitudes is on the map</source>
+      <translation>aucune des latitudes n’est sur la carte</translation>
     </message>
     <message>
       <source>not drawn by the symbology</source>

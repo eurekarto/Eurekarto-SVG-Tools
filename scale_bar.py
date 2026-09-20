@@ -122,12 +122,14 @@ def delta_longitude(distance, latitude, major, minor):
 class ScaleBar:
     """Builds the SVG of a variable scale bar, in page millimetres."""
 
-    def __init__(self, options, ellipsoid, longitude, transform, writer, footer=()):
+    def __init__(self, options, ellipsoid, longitude, transform, writer, footer=(),
+                 only_visible=True):
         self.options = options
         self.ellipsoid = ellipsoid
         self.longitude = longitude
         self.transform = transform
         self.writer = writer
+        self.only_visible = only_visible
         # Caption, then the projection name: one line each, under the bars.
         self.footer = [line for line in footer if line]
 
@@ -159,8 +161,37 @@ class ScaleBar:
                                 number(length, 1))
         return length, None
 
+    def on_the_map(self, latitude):
+        """Whether that parallel crosses the frame at the measuring longitude.
+
+        A bar for a latitude the map does not show states a scale the reader
+        cannot check, so it is dropped rather than drawn.
+        """
+        if not self.only_visible:
+            return True
+        try:
+            point = self.transform.transform(QgsPointXY(self.longitude, latitude))
+        except Exception:
+            return False
+        try:
+            if self.writer.mask.contains(point):
+                return True
+        except (AttributeError, TypeError):
+            pass
+        return bool(self.writer.extent.contains(point))
+
     def measure(self, latitudes, feedback):
         """Segment distance in metres and the page length of each bar."""
+        shown = []
+        for latitude in latitudes:
+            if self.on_the_map(latitude):
+                shown.append(latitude)
+            else:
+                feedback.pushInfo(tr('Latitude {0}° is not on the map: no bar for it.')
+                                  .format(number(latitude, 3)))
+        if not shown:
+            return None, [], tr('none of the latitudes is on the map')
+        latitudes = shown
         metres = self.options.distance * 1000.0
         segments = self.options.segments
         if metres <= 0:

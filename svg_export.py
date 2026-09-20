@@ -307,6 +307,7 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
     SCALE_HEIGHT = 'SCALE_HEIGHT'
     SCALE_FONT = 'SCALE_FONT'
     SCALE_PROJECTION = 'SCALE_PROJECTION'
+    SCALE_VISIBLE = 'SCALE_VISIBLE'
     OUTPUT = 'OUTPUT'
 
     def name(self):
@@ -413,6 +414,9 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
             self.SCALE_DISTANCE,
             section(bar, tr('Distance per segment in kilometres (0 = automatic)')),
             PARAMETER_DOUBLE, defaultValue=0, minValue=0))
+        self.addParameter(QgsProcessingParameterBoolean(
+            self.SCALE_VISIBLE, section(bar, tr('Only latitudes shown on the map')),
+            defaultValue=True))
         self.addParameter(QgsProcessingParameterString(
             self.SCALE_CAPTION, section(bar, tr('Scale bar caption')),
             defaultValue=tr('Distances along parallels'), optional=True))
@@ -1076,7 +1080,8 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         footer = [options.caption]
         if self.parameterAsBool(parameters, self.SCALE_PROJECTION, context):
             footer.append(self.projection_name(frame['crs']))
-        bar = ScaleBar(options, (major, minor), longitude, to_map, writer, footer)
+        bar = ScaleBar(options, (major, minor), longitude, to_map, writer, footer,
+                       self.parameterAsBool(parameters, self.SCALE_VISIBLE, context))
         block = bar.build(frame['page'], latitudes, feedback)
         return block, bar.style(options.font) if block else ''
 

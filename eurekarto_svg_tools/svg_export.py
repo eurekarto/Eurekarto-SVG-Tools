@@ -20,7 +20,8 @@ from qgis.PyQt.QtGui import QColor
 from qgis.core import (
     Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsCsException,
     QgsExpressionContext, QgsExpressionContextUtils, QgsFeatureRequest, QgsGeometry,
-    QgsLayoutItemMap, QgsLayoutItemRegistry, QgsMapRendererParallelJob, QgsMapSettings,
+    QgsLayoutItemLegend, QgsLayoutItemMap, QgsLayoutItemRegistry,
+    QgsMapRendererParallelJob, QgsMapSettings,
     QgsPointXY,
     QgsProcessing, QgsProcessingAlgorithm, QgsProcessingException,
     QgsProcessingParameterBoolean, QgsProcessingParameterDefinition,
@@ -33,6 +34,8 @@ from qgis.core import (
 )
 
 from .common import enum as _enum, number, tr, xml_text
+from .layout_items import (DOTS_PER_MILLIMETRE, graft, marker_fragment,
+                           painted_fragment, painted_labels)
 from .scale_bar import ScaleBar, ellipsoid_of, latitudes_of
 
 
@@ -65,6 +68,10 @@ ADVANCED_PARAMETER = _enum(Qgis, 'ProcessingParameterFlag', 'Advanced',
 # Values that look like an ISO code but are "no data" markers. None of them is a
 # valid ISO 3166 alpha-2 or alpha-3 code: 'NA' (Namibia) is deliberately absent.
 PLACEHOLDER_IDS = frozenset({'-99', '-999', 'N/A', '#N/A', 'NULL', 'NONE', 'UNKNOWN'})
+
+# Renderers that compute an image from the features rather than draw a symbol
+# for each: there is nothing to group or name, so QGIS paints them as images.
+IMAGE_RENDERERS = frozenset({'heatmapRenderer'})
 
 # Largest image accepted, so a high DPI on a large page cannot exhaust memory.
 MAXIMUM_PIXELS = 60000000
@@ -388,15 +395,21 @@ class FrameWriter:
                 pieces.append('<path d="{0}"/>'.format(drawn))
         return pieces
 
-    def point_pieces(self, geometry, radius):
+    def point_pieces(self, geometry, radius, marker=None):
+        """A copy of the class marker at each point, or a plain circle without one."""
         pieces = []
         for point in geometry.asMultiPoint():
             x, y = self.to_frame(point)
-            pieces.append('<circle cx="{0}" cy="{1}" r="{2}"/>'.format(
-                number(x, self.precision), number(y, self.precision), number(radius, 3)))
+            if marker:
+                pieces.append('<g transform="translate({0},{1}) scale({2})">{3}</g>'.format(
+                    number(x, self.precision), number(y, self.precision),
+                    number(1.0 / DOTS_PER_MILLIMETRE, 9), marker))
+            else:
+                pieces.append('<circle cx="{0}" cy="{1}" r="{2}"/>'.format(
+                    number(x, self.precision), number(y, self.precision), number(radius, 3)))
         return pieces
 
-    def pieces(self, geometry, geometry_type, radius, stats, stroke=True):
+    def pieces(self, geometry, geometry_type, radius, stats, stroke=True, marker=None):
         """SVG elements for one geometry, plus the parts below the minimum area."""
         if geometry_type == GEOMETRY_POLYGON:
             return self.polygon_pieces(geometry, stats, stroke)
@@ -404,7 +417,7 @@ class FrameWriter:
         geometry.convertToMultiType()
         if geometry_type == GEOMETRY_LINE:
             return self.line_pieces(geometry), 0
-        return self.point_pieces(geometry, radius), 0
+        return self.point_pieces(geometry, radius, marker), 0
 
 
 def section(name, label):
@@ -445,6 +458,8 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
     SCALE_PROJECTION = 'SCALE_PROJECTION'
     SCALE_VISIBLE = 'SCALE_VISIBLE'
     MAX_TOLERANCE = 'MAX_TOLERANCE'
+    LEGENDS = 'LEGENDS'
+    LABELS = 'LABELS'
     OUTPUT = 'OUTPUT'
 
     def name(self):
@@ -505,6 +520,11 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterLayoutItem(
             self.MAP_ITEM, section(card, tr('Map frame')),
             parentLayoutParameterName=self.LAYOUT, itemType=LAYOUT_MAP_ITEM))
+        self.addParameter(QgsProcessingParameterBoolean(
+            self.LABELS, section(card, tr('Include the labels')), defaultValue=True))
+        self.addParameter(QgsProcessingParameterBoolean(
+            self.LEGENDS, section(card, tr('Include the layout legends')),
+            defaultValue=True))
         self.addParameter(QgsProcessingParameterMultipleLayers(
             self.LAYERS,
             section(layers, tr('Layers to export (empty = those shown in the frame)')),
@@ -650,6 +670,15 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         if opacity < 0.999:
             attributes.append('fill-opacity="{0}"'.format(number(opacity, 3)))
         return attributes
+
+    @staticmethod
+    def default_style(geometry_type, radius):
+        """Plain styling for a layer exported without its symbology."""
+        if geometry_type == GEOMETRY_POLYGON:
+            return 'fill="#cccccc" stroke="none"', radius
+        if geometry_type == GEOMETRY_LINE:
+            return 'fill="none" stroke="#000000" stroke-width="0.2"', radius
+        return 'fill="#000000" stroke="none"', radius
 
     @staticmethod
     def symbol_layers(symbol):
@@ -901,6 +930,8 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         except (AttributeError, TypeError):
             context = QgsRenderContext()
             context.setExpressionContext(QgsExpressionContext())
+            # Rules with a scale range are only active at the scale they cover.
+            context.setRendererScale(item.scale())
             return context
 
     # -------------------------------------------------------------------- rasters
@@ -969,6 +1000,27 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
             request.setFilterRect(QgsRectangle())
         return request, transform
 
+    @classmethod
+    def drawn_as_image(cls, layer):
+        """True for a vector layer whose renderer paints an image, such as a heatmap."""
+        return isinstance(layer, QgsVectorLayer) and cls.renderer_type(layer) in IMAGE_RENDERERS
+
+    @staticmethod
+    def renderer_type(layer):
+        try:
+            return layer.renderer().type()
+        except (AttributeError, TypeError):
+            return '?'
+
+    @staticmethod
+    def draws_nothing(layer):
+        """True for a layer set to "No symbols": drawn for its labels alone."""
+        renderer = layer.renderer()
+        try:
+            return renderer is not None and renderer.type() == 'nullSymbol'
+        except (AttributeError, TypeError):
+            return False
+
     @staticmethod
     def renderer_of(layer, render_context, use_style):
         """A started renderer clone and its legend labels, or (None, {})."""
@@ -987,15 +1039,35 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         return renderer, legend
 
     @staticmethod
-    def class_of(renderer, legend, feature, render_context):
+    def first_symbol(renderer, feature, render_context):
+        """The symbol QGIS draws the feature with, whatever the renderer type.
+
+        symbolForFeature is not implemented by the rule-based renderer, which
+        always answers None; symbolsForFeature is implemented by every renderer,
+        so it is asked first.
+        """
+        for reader in ('symbolsForFeature', 'originalSymbolsForFeature'):
+            method = getattr(renderer, reader, None)
+            if method is None:
+                continue
+            try:
+                symbols = method(feature, render_context)
+            except (AttributeError, TypeError):
+                continue
+            if symbols:
+                return symbols[0]
+        try:
+            return renderer.symbolForFeature(feature, render_context)
+        except (AttributeError, TypeError):
+            return None
+
+    @classmethod
+    def class_of(cls, renderer, legend, feature, render_context):
         """(key, order, label, symbol); key None when the symbology draws nothing."""
         if renderer is None:
             return '', 0, '', None
         render_context.expressionContext().setFeature(feature)
-        try:
-            symbol = renderer.symbolForFeature(feature, render_context)
-        except (AttributeError, TypeError):
-            symbol = None
+        symbol = cls.first_symbol(renderer, feature, render_context)
         if symbol is None:
             return None, 0, '', None
         try:
@@ -1047,13 +1119,35 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
             return 'name', label.casefold()
         return 'code', code
 
-    def class_slot(self, classes, key, order, label, symbol, geometry_type, options):
-        """The slot collecting one symbology class, created with its style on first use."""
+    @staticmethod
+    def marker_of(symbol, geometry_type, feedback):
+        """The class marker drawn by QGIS, or None and a warning when it cannot be."""
+        if symbol is None or geometry_type != GEOMETRY_POINT:
+            return None
+        try:
+            return marker_fragment(symbol) or None
+        except Exception as error:
+            feedback.pushWarning(
+                tr('A point symbol could not be drawn, circles are used instead: {0}')
+                .format(error))
+            return None
+
+    def class_slot(self, classes, key, order, label, symbol, geometry_type, options,
+                   invisible=False, feedback=None):
+        """The slot collecting one symbology class, created with its style on first use.
+
+        An invisible slot holds shapes QGIS does not draw but that must still be
+        there to carry their names: no fill, no stroke, ready to be styled.
+        """
         if key not in classes:
             attributes, radius = self.style_of(symbol, geometry_type, options.default_radius)
+            if invisible:
+                attributes = 'fill="none" stroke="none"'
             classes[key] = {'order': order, 'label': label, 'groups': {},
                             'attributes': attributes, 'radius': radius, 'flat': [],
-                            'stroke': 'stroke="none"' not in attributes}
+                            'stroke': 'stroke="none"' not in attributes,
+                            'marker': None if invisible or feedback is None
+                            else self.marker_of(symbol, geometry_type, feedback)}
         return classes[key]
 
     @classmethod
@@ -1066,15 +1160,39 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         if label and label not in entry['names']:
             entry['names'].append(label)
 
+    @staticmethod
+    def usable_join(layer, join_field, geometry_type, feedback):
+        """The join field, or nothing when the layer holds no polygons to merge."""
+        if join_field and geometry_type != GEOMETRY_POLYGON:
+            feedback.pushWarning(
+                tr('Layer "{0}" holds no polygons: grouping ignored.').format(layer.name()))
+            return ''
+        return join_field
+
+    def explain(self, layer, classes, dropped, invisible, feedback):
+        """Say why a layer came out empty or unstyled, rather than leave it to guesswork."""
+        if invisible:
+            feedback.pushInfo(tr(
+                'Layer "{0}" is drawn without symbols: its shapes are written unstyled, '
+                'to carry their names.').format(layer.name()))
+        if not classes and dropped[UNSYMBOLIZED]:
+            feedback.pushWarning(tr(
+                'Layer "{0}": no feature matched its symbology ({1} renderer). Check its '
+                'rules or categories.').format(layer.name(), self.renderer_type(layer)))
+
     def collect(self, layer, writer, fields, options, render_context, context, feedback):
         """Group one vector layer's features by symbology class, then by name."""
         name_field, join_field = fields
         geometry_type = layer.geometryType()
-        if join_field and geometry_type != GEOMETRY_POLYGON:
-            feedback.pushWarning(
-                tr('Layer "{0}" holds no polygons: grouping ignored.').format(layer.name()))
-            join_field = ''
-        renderer, legend = self.renderer_of(layer, render_context, options.use_style)
+        join_field = self.usable_join(layer, join_field, geometry_type, feedback)
+        invisible = options.use_style and self.draws_nothing(layer)
+        if invisible and not (name_field or join_field):
+            feedback.pushInfo(tr(
+                'Layer "{0}" is drawn without symbols: only its labels are '
+                'exported.').format(layer.name()))
+            return {}, False
+        renderer, legend = (None, {}) if invisible else self.renderer_of(
+            layer, render_context, options.use_style)
         request, transform = self.request_for(layer, writer, context)
         classes, pending = {}, {}
         dropped = {OUTSIDE: 0, REPROJECTION: 0, INVALID: 0, TOO_SMALL: 0, UNSYMBOLIZED: 0}
@@ -1096,14 +1214,14 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
                 if geometry is None:
                     continue
                 slot = self.class_slot(classes, key, order, class_label, symbol,
-                                       geometry_type, options)
+                                       geometry_type, options, invisible, feedback)
                 label = field_text(feature[name_field]) if name_field else ''
                 if join_field:
                     self.hold_for_join(pending, key, geometry, label,
                                        field_text(feature[join_field]).upper())
                     continue
                 pieces, small = writer.pieces(geometry, geometry_type, slot['radius'],
-                                              stats, slot['stroke'])
+                                              stats, slot['stroke'], slot['marker'])
                 if not pieces:
                     dropped[TOO_SMALL if small else INVALID] += 1
                     continue
@@ -1116,6 +1234,7 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
                 canceled = True
         finally:
             self.stop_renderer(renderer, render_context, feedback)
+        self.explain(layer, classes, dropped, invisible, feedback)
         self.report(layer, dropped, stats, feedback)
         return classes, canceled
 
@@ -1220,7 +1339,7 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
     # ----------------------------------------------------------------- execution
 
     @staticmethod
-    def document(frame, body, scale=(), style=''):
+    def document(frame, body, scale=(), style='', extras=(), labels=()):
         """The complete SVG document: the map group, then the scale bar beside it.
 
         The scale bar sits outside the map group on purpose: its coordinates are
@@ -1244,7 +1363,9 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         ]
         lines.extend(body)
         lines.append('</g>')
+        lines.extend(labels)
         lines.extend(scale)
+        lines.extend(extras)
         lines.append('</svg>')
         return '\n'.join(lines) + '\n'
 
@@ -1256,6 +1377,50 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         if description and authid:
             return '{0} ({1})'.format(description, authid)
         return description or authid or ''
+
+    def labels_of(self, parameters, context, item, frame, used, feedback):
+        """The labels of the map frame, placed by QGIS's own labelling engine."""
+        if not self.parameterAsBool(parameters, self.LABELS, context):
+            return []
+        try:
+            elements = painted_labels(item, frame['size'])
+        except Exception as error:
+            feedback.pushWarning(tr('The labels could not be rendered: {0}').format(error))
+            return []
+        if not elements:
+            feedback.pushInfo(tr('No label is shown in the map frame.'))
+            return []
+        feedback.pushInfo(tr('Labels embedded, as text where the labelling allows it.'))
+        return graft(xml_identifier('etiquettes', used), xml_text(tr('Labels')),
+                     frame['placement'], elements)
+
+    def legends_of(self, parameters, context, layout, item, used, feedback):
+        """Every visible legend on the map frame's page, painted by QGIS itself."""
+        if not self.parameterAsBool(parameters, self.LEGENDS, context):
+            return []
+        page_index = max(item.page(), 0)
+        page = layout.pageCollection().page(page_index)
+        legends = [one for one in layout.items()
+                   if isinstance(one, QgsLayoutItemLegend) and one.isVisible()
+                   and max(one.page(), 0) == page_index]
+        if not legends:
+            feedback.pushInfo(tr('No legend on the page of the map frame.'))
+            return []
+        factor = self.to_millimetres(layout, 1.0)
+        blocks = []
+        for legend in legends:
+            # displayName() answers "<Legend>" for an item without an identifier.
+            label = (legend.id() or '').strip() or tr('Legend')
+            try:
+                elements = painted_fragment(legend, factor)
+            except Exception as error:
+                feedback.pushWarning(tr('Legend "{0}" could not be rendered: {1}').format(
+                    label, error))
+                continue
+            blocks += graft(xml_identifier('legende', used), xml_text(label),
+                            self.placement_of(layout, legend, page), elements)
+            feedback.pushInfo(tr('Legend "{0}" embedded as vectors.').format(label))
+        return blocks
 
     def scale_bar_of(self, parameters, context, item, writer, frame, feedback):
         """The scale bar block and its style, or ([], '') when it is not wanted."""
@@ -1332,7 +1497,11 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
             if feedback.isCanceled():
                 canceled = True
                 break
-            if isinstance(layer, QgsVectorLayer):
+            if self.drawn_as_image(layer):
+                feedback.pushInfo(tr(
+                    'Layer "{0}" computes an image from its features ({1} renderer): '
+                    'embedded as an image.').format(layer.name(), self.renderer_type(layer)))
+            if isinstance(layer, QgsVectorLayer) and not self.drawn_as_image(layer):
                 fields = naming.get(layer.name().casefold(), ('', ''))
                 classes, canceled = self.collect(layer, writer, fields, options,
                                                  render_context, context, feedback)
@@ -1353,8 +1522,10 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
             raise QgsProcessingException(tr('Nothing to export inside the map frame.'))
         scale, scale_style = self.scale_bar_of(parameters, context, item, writer,
                                                frame, feedback)
+        labels = self.labels_of(parameters, context, item, frame, used, feedback)
+        legends = self.legends_of(parameters, context, layout, item, used, feedback)
         with open(destination, 'w', encoding='utf-8') as handle:
-            handle.write(self.document(frame, body, scale, scale_style))
+            handle.write(self.document(frame, body, scale, scale_style, legends, labels))
         if canceled:
             feedback.pushWarning(tr(
                 'Canceled: {0} is incomplete — check which layers it holds.').format(

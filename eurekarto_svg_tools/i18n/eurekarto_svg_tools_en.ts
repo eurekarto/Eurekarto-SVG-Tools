@@ -11,6 +11,10 @@
       <translation>&lt;p&gt;Writes a whole map frame to one SVG file: one group per layer, in map order, ready to open in Illustrator or Inkscape.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Named groups.&lt;/b&gt; Choose a layer and the field that names its features — each value becomes a named group, so countries arrive as "France", "Spain" and so on instead of anonymous paths. The grouping field (optional) merges the polygons sharing a value into a single shape: with an ISO code, a country and its islands become one object. Codes are compared without case or spaces, and no-data codes (-99, N/A, NULL) fall back to the name, so unrelated territories stay apart. Use the table below for further layers.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Colours.&lt;/b&gt; Fills, outlines and widths are read from the layer symbology, and each class of a categorized or graduated layer becomes its own group named after its legend label, with named features nested inside. Layers with no outline in QGIS get none here. Every level of a symbol is read — a polygon whose outline is a line level keeps it, and is not filled with its colour — but only as a flat fill and a stroke, so hatches, gradients and marker shapes come out plain, to restyle. Rasters are rendered by QGIS and embedded as images.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Alignment.&lt;/b&gt; The file is written in millimetres at the page size, with the map placed where the frame sits, so it can be pasted in place over the layout own SVG export — which carries the labels and the page furniture this algorithm does not export. Geometries are repaired and cut at the frame edge, so the file holds no clipping mask.&lt;/p&gt;&lt;p&gt;Shapes holding more vertices than the limit are simplified, because Illustrator does not open very dense paths. The log reports the alignment values it read, the classes and groups written, the shapes simplified and every feature dropped, by cause.&lt;/p&gt;</translation>
     </message>
     <message>
+      <source>A point symbol could not be drawn, circles are used instead: {0}</source>
+      <translation>A point symbol could not be drawn, circles are used instead: {0}</translation>
+    </message>
+    <message>
       <source>About</source>
       <translation>About</translation>
     </message>
@@ -95,8 +99,24 @@
       <translation>Image resolution (DPI)</translation>
     </message>
     <message>
+      <source>Include the labels</source>
+      <translation>Include the labels</translation>
+    </message>
+    <message>
+      <source>Include the layout legends</source>
+      <translation>Include the layout legends</translation>
+    </message>
+    <message>
       <source>Keep the colours and classes from QGIS</source>
       <translation>Keep the colours and classes from QGIS</translation>
+    </message>
+    <message>
+      <source>Labels</source>
+      <translation>Labels</translation>
+    </message>
+    <message>
+      <source>Labels embedded, as text where the labelling allows it.</source>
+      <translation>Labels embedded, as text where the labelling allows it.</translation>
     </message>
     <message>
       <source>Latitude {0}° is not on the map: no bar for it.</source>
@@ -115,6 +135,10 @@
       <translation>Layer</translation>
     </message>
     <message>
+      <source>Layer "{0}" computes an image from its features ({1} renderer): embedded as an image.</source>
+      <translation>Layer "{0}" computes an image from its features ({1} renderer): embedded as an image.</translation>
+    </message>
+    <message>
       <source>Layer "{0}" embedded as an image, {1} x {2} px, {3} KB.</source>
       <translation>Layer "{0}" embedded as an image, {1} x {2} px, {3} KB.</translation>
     </message>
@@ -129,6 +153,14 @@
     <message>
       <source>Layer "{0}" holds no polygons: grouping ignored.</source>
       <translation>Layer "{0}" holds no polygons: grouping ignored.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}" is drawn without symbols: its shapes are written unstyled, to carry their names.</source>
+      <translation>Layer "{0}" is drawn without symbols: its shapes are written unstyled, to carry their names.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}" is drawn without symbols: only its labels are exported.</source>
+      <translation>Layer "{0}" is drawn without symbols: only its labels are exported.</translation>
     </message>
     <message>
       <source>Layer "{0}" is hidden at this scale.</source>
@@ -157,6 +189,10 @@
     <message>
       <source>Layer "{0}": dropped {1}.</source>
       <translation>Layer "{0}": dropped {1}.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}": no feature matched its symbology ({1} renderer). Check its rules or categories.</source>
+      <translation>Layer "{0}": no feature matched its symbology ({1} renderer). Check its rules or categories.</translation>
     </message>
     <message>
       <source>Layer "{0}": value {1} covers several names ({2}); the first is used.</source>
@@ -195,6 +231,18 @@
       <translation>Layout "{0}": page {1} x {2} mm, frame {3} x {4} mm, placement {5}, map rotation {6}°, scale 1:{7}, CRS {8}.</translation>
     </message>
     <message>
+      <source>Legend</source>
+      <translation>Legend</translation>
+    </message>
+    <message>
+      <source>Legend "{0}" could not be rendered: {1}</source>
+      <translation>Legend "{0}" could not be rendered: {1}</translation>
+    </message>
+    <message>
+      <source>Legend "{0}" embedded as vectors.</source>
+      <translation>Legend "{0}" embedded as vectors.</translation>
+    </message>
+    <message>
       <source>Map</source>
       <translation>Map</translation>
     </message>
@@ -227,8 +275,16 @@
       <translation>Naming</translation>
     </message>
     <message>
+      <source>No label is shown in the map frame.</source>
+      <translation>No label is shown in the map frame.</translation>
+    </message>
+    <message>
       <source>No layer to export.</source>
       <translation>No layer to export.</translation>
+    </message>
+    <message>
+      <source>No legend on the page of the map frame.</source>
+      <translation>No legend on the page of the map frame.</translation>
     </message>
     <message>
       <source>No scale bar written: no latitude could be measured in this projection. First reason: {0}.</source>
@@ -305,6 +361,10 @@
     <message>
       <source>Separate islands into distinct paths</source>
       <translation>Separate islands into distinct paths</translation>
+    </message>
+    <message>
+      <source>The labels could not be rendered: {0}</source>
+      <translation>The labels could not be rendered: {0}</translation>
     </message>
     <message>
       <source>The map frame has no coordinate reference system.</source>

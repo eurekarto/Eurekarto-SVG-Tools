@@ -11,6 +11,10 @@
       <translation>&lt;p&gt;Écrit tout un cadre de carte dans un seul fichier SVG : un groupe par couche, dans l’ordre de la carte, prêt à ouvrir dans Illustrator ou Inkscape.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Groupes nommés.&lt;/b&gt; Choisissez une couche et le champ qui nomme ses entités : chaque valeur devient un groupe portant ce nom, et les pays arrivent en « France », « Espagne » plutôt qu’en tracés anonymes. Le champ de regroupement (facultatif) réunit en une seule forme les polygones qui partagent une valeur : avec un code ISO, un pays et ses îles ne font plus qu’un objet. Les codes sont comparés sans tenir compte de la casse ni des espaces, et les codes sans valeur (-99, N/A, NULL) retombent sur le nom, pour que des territoires sans rapport ne soient pas réunis. Le tableau en dessous sert aux autres couches.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Couleurs.&lt;/b&gt; Remplissages, contours et épaisseurs sont lus dans la symbologie, et chaque classe d’une couche catégorisée ou graduée forme son propre groupe, nommé d’après son libellé de légende, avec les entités nommées à l’intérieur. Une couche sans contour dans QGIS n’en a pas non plus ici. Tous les niveaux d’un symbole sont lus — un polygone dont le contour est un niveau de ligne le garde, au lieu d’être rempli de sa couleur — mais le rendu reste un aplat et un trait : hachures, dégradés et formes de marqueurs ressortent simplifiés, à rhabiller. Les rasters sont dessinés par QGIS et intégrés en images.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Calage.&lt;/b&gt; Le fichier est écrit en millimètres à la taille de la page, la carte placée là où se trouve le cadre : il se colle sur place par-dessus l’export SVG de la mise en page, qui porte les étiquettes et l’habillage que cet algorithme n’exporte pas. Les géométries sont réparées et coupées au bord du cadre, donc le fichier ne contient aucun masque d’écrêtage.&lt;/p&gt;&lt;p&gt;Les formes qui comptent plus de sommets que la limite sont simplifiées, parce qu’Illustrator n’ouvre pas les tracés très denses. Le journal indique les valeurs de calage lues, les classes et groupes écrits, les formes simplifiées et chaque entité écartée, avec sa raison.&lt;/p&gt;</translation>
     </message>
     <message>
+      <source>A point symbol could not be drawn, circles are used instead: {0}</source>
+      <translation>Un symbole de point n’a pas pu être dessiné, des cercles le remplacent : {0}</translation>
+    </message>
+    <message>
       <source>About</source>
       <translation>À propos</translation>
     </message>
@@ -95,8 +99,24 @@
       <translation>Résolution des images (DPI)</translation>
     </message>
     <message>
+      <source>Include the labels</source>
+      <translation>Inclure les étiquettes</translation>
+    </message>
+    <message>
+      <source>Include the layout legends</source>
+      <translation>Inclure les légendes de la mise en page</translation>
+    </message>
+    <message>
       <source>Keep the colours and classes from QGIS</source>
       <translation>Garder les couleurs et les classes de QGIS</translation>
+    </message>
+    <message>
+      <source>Labels</source>
+      <translation>Étiquettes</translation>
+    </message>
+    <message>
+      <source>Labels embedded, as text where the labelling allows it.</source>
+      <translation>Étiquettes intégrées, en texte lorsque l’étiquetage le permet.</translation>
     </message>
     <message>
       <source>Latitude {0}° is not on the map: no bar for it.</source>
@@ -115,6 +135,10 @@
       <translation>Couche</translation>
     </message>
     <message>
+      <source>Layer "{0}" computes an image from its features ({1} renderer): embedded as an image.</source>
+      <translation>La couche « {0} » calcule une image à partir de ses entités (rendu {1}) : intégrée en image.</translation>
+    </message>
+    <message>
       <source>Layer "{0}" embedded as an image, {1} x {2} px, {3} KB.</source>
       <translation>Couche « {0} » intégrée en image, {1} x {2} px, {3} Ko.</translation>
     </message>
@@ -129,6 +153,14 @@
     <message>
       <source>Layer "{0}" holds no polygons: grouping ignored.</source>
       <translation>La couche « {0} » ne contient pas de polygones : regroupement ignoré.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}" is drawn without symbols: its shapes are written unstyled, to carry their names.</source>
+      <translation>La couche « {0} » est dessinée sans symbole : ses formes sont écrites sans style, pour porter leurs noms.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}" is drawn without symbols: only its labels are exported.</source>
+      <translation>La couche « {0} » est dessinée sans symbole : seules ses étiquettes sont exportées.</translation>
     </message>
     <message>
       <source>Layer "{0}" is hidden at this scale.</source>
@@ -157,6 +189,10 @@
     <message>
       <source>Layer "{0}": dropped {1}.</source>
       <translation>Couche « {0} » : écartées, {1}.</translation>
+    </message>
+    <message>
+      <source>Layer "{0}": no feature matched its symbology ({1} renderer). Check its rules or categories.</source>
+      <translation>Couche « {0} » : aucune entité ne correspond à sa symbologie (rendu {1}). Vérifiez ses règles ou ses catégories.</translation>
     </message>
     <message>
       <source>Layer "{0}": value {1} covers several names ({2}); the first is used.</source>
@@ -195,6 +231,18 @@
       <translation>Mise en page « {0} » : page {1} x {2} mm, cadre {3} x {4} mm, placement {5}, rotation de la carte {6}°, échelle 1:{7}, SCR {8}.</translation>
     </message>
     <message>
+      <source>Legend</source>
+      <translation>Légende</translation>
+    </message>
+    <message>
+      <source>Legend "{0}" could not be rendered: {1}</source>
+      <translation>La légende « {0} » n’a pas pu être rendue : {1}</translation>
+    </message>
+    <message>
+      <source>Legend "{0}" embedded as vectors.</source>
+      <translation>Légende « {0} » intégrée en vectoriel.</translation>
+    </message>
+    <message>
       <source>Map</source>
       <translation>Carte</translation>
     </message>
@@ -227,8 +275,16 @@
       <translation>Nommage</translation>
     </message>
     <message>
+      <source>No label is shown in the map frame.</source>
+      <translation>Aucune étiquette n’est affichée dans le cadre de carte.</translation>
+    </message>
+    <message>
       <source>No layer to export.</source>
       <translation>Aucune couche à exporter.</translation>
+    </message>
+    <message>
+      <source>No legend on the page of the map frame.</source>
+      <translation>Aucune légende sur la page du cadre de carte.</translation>
     </message>
     <message>
       <source>No scale bar written: no latitude could be measured in this projection. First reason: {0}.</source>
@@ -305,6 +361,10 @@
     <message>
       <source>Separate islands into distinct paths</source>
       <translation>Séparer les îles en tracés distincts</translation>
+    </message>
+    <message>
+      <source>The labels could not be rendered: {0}</source>
+      <translation>Les étiquettes n’ont pas pu être rendues : {0}</translation>
     </message>
     <message>
       <source>The map frame has no coordinate reference system.</source>

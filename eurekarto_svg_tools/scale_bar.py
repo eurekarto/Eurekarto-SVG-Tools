@@ -282,7 +282,7 @@ class ScaleBar:
             block.extend(self.bar_row(index, latitude, length, geometry))
         for index, line in enumerate(self.footer):
             block.append('<text id="{0}" x="{1}" y="{2}">{3}</text>'.format(
-                'legende' if index == 0 else 'legende_{0}'.format(index + 1),
+                'echelle_legende' if index == 0 else 'echelle_legende_{0}'.format(index + 1),
                 number(geometry['left'], 3),
                 number(geometry['footer_y'] + index * geometry['font'] * 1.3, 3),
                 xml_text(line)))

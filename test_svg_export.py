@@ -15,8 +15,15 @@ import types
 import unittest
 import xml.etree.ElementTree as ElementTree
 
-import PyQt5.QtCore as QtCore
-import PyQt5.QtGui as QtGui
+import os
+
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+import PyQt5.QtCore as QtCore  # noqa: E402
+import PyQt5.QtGui as QtGui  # noqa: E402
+import PyQt5.QtSvg as QtSvg  # noqa: E402
+import PyQt5.QtWidgets as QtWidgets  # noqa: E402
+
+APPLICATION = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
 
 # --------------------------------------------------------------------- stubs
@@ -119,6 +126,9 @@ def install_stubs():
         pass
 
     core.Qgis = types.SimpleNamespace(
+        MapSettingsFlag=types.SimpleNamespace(DrawLabeling=1, SkipSymbolRendering=2,
+                                              ForceVectorOutput=4),
+        TextRenderFormat=types.SimpleNamespace(AlwaysText=1),
         SymbolType=types.SimpleNamespace(Fill='fill', Line='line', Marker='marker'),
         GeometryType=types.SimpleNamespace(Polygon='polygon', Line='line', Point='point'),
         WkbType=types.SimpleNamespace(GeometryCollection='GeometryCollection'),
@@ -174,6 +184,7 @@ def install_stubs():
                  'QgsProcessingParameterLayout', 'QgsProcessingParameterLayoutItem',
                  'QgsProcessingParameterMatrix', 'QgsProcessingParameterMultipleLayers',
                  'QgsProcessingParameterString', 'QgsProcessingParameterVectorLayer',
+                 'QgsLayoutItemLegend', 'QgsMapRendererCustomPainterJob',
                  'QgsRenderContext', 'QgsVectorLayer'):
         setattr(core, name, type(name, (Exception,), {}))
 
@@ -181,8 +192,11 @@ def install_stubs():
     qgis.PyQt = pyqt
     pyqt.QtCore = QtCore
     pyqt.QtGui = QtGui
+    pyqt.QtSvg = QtSvg
+    pyqt.QtWidgets = QtWidgets
     sys.modules.update({'qgis': qgis, 'qgis.core': core, 'qgis.PyQt': pyqt,
-                        'qgis.PyQt.QtCore': QtCore, 'qgis.PyQt.QtGui': QtGui})
+                        'qgis.PyQt.QtCore': QtCore, 'qgis.PyQt.QtGui': QtGui,
+                        'qgis.PyQt.QtSvg': QtSvg, 'qgis.PyQt.QtWidgets': QtWidgets})
 
     package = types.ModuleType('eurekarto_svg_tools')
     package.__path__ = [str(pathlib.Path(__file__).resolve().parent / 'eurekarto_svg_tools')]
@@ -190,6 +204,7 @@ def install_stubs():
 
 
 install_stubs()
+from eurekarto_svg_tools import layout_items  # noqa: E402
 from eurekarto_svg_tools import scale_bar  # noqa: E402
 from eurekarto_svg_tools import svg_export as module  # noqa: E402
 
@@ -609,6 +624,407 @@ class Styles(unittest.TestCase):
         self.assertIsNone(module.ExportLayoutSvg.render_millimetres(1.0, 'map units'))
 
 
+class Renderers(unittest.TestCase):
+    """Every renderer type must yield the symbol QGIS actually draws."""
+
+    symbol = object()
+
+    def test_a_rule_based_renderer_answers_through_symbols_for_feature(self):
+        # QgsRuleBasedRenderer.symbolForFeature always returns None.
+        renderer = types.SimpleNamespace(
+            symbolForFeature=lambda feature, context: None,
+            symbolsForFeature=lambda feature, context: [self.symbol])
+        self.assertIs(module.ExportLayoutSvg.first_symbol(renderer, None, None), self.symbol)
+
+    def test_a_renderer_offering_only_the_single_form_still_works(self):
+        renderer = types.SimpleNamespace(symbolForFeature=lambda feature, context: self.symbol)
+        self.assertIs(module.ExportLayoutSvg.first_symbol(renderer, None, None), self.symbol)
+
+    def test_a_feature_no_rule_matches_has_no_symbol(self):
+        renderer = types.SimpleNamespace(
+            symbolForFeature=lambda feature, context: None,
+            symbolsForFeature=lambda feature, context: [],
+            originalSymbolsForFeature=lambda feature, context: [])
+        self.assertIsNone(module.ExportLayoutSvg.first_symbol(renderer, None, None))
+
+    def test_a_layer_set_to_no_symbols_is_recognised(self):
+        def layer(kind):
+            return types.SimpleNamespace(renderer=lambda: types.SimpleNamespace(type=lambda: kind))
+        self.assertTrue(module.ExportLayoutSvg.draws_nothing(layer('nullSymbol')))
+        self.assertFalse(module.ExportLayoutSvg.draws_nothing(layer('RuleRenderer')))
+        self.assertFalse(module.ExportLayoutSvg.draws_nothing(
+            types.SimpleNamespace(renderer=lambda: None)))
+
+    def test_a_layer_exported_without_its_symbology_gets_plain_styling(self):
+        algorithm = module.ExportLayoutSvg.__new__(module.ExportLayoutSvg)
+        for geometry_type in ('polygon', 'line', 'point'):
+            attributes, radius = algorithm.style_of(None, geometry_type, 0.8)
+            self.assertTrue(attributes)
+            self.assertEqual(radius, 0.8)
+
+    def test_an_invisible_class_carries_neither_fill_nor_stroke(self):
+        algorithm = module.ExportLayoutSvg.__new__(module.ExportLayoutSvg)
+        options = module.Options(use_style=True, clip=True, raster_dpi=200, default_radius=0.8)
+        classes = {}
+        slot = algorithm.class_slot(classes, '', 0, '', None, 'polygon', options, True)
+        self.assertEqual(slot['attributes'], 'fill="none" stroke="none"')
+        self.assertFalse(slot['stroke'])
+
+
+class LabelTidying(unittest.TestCase):
+    """What a renderer paints without showing anything must not reach the file."""
+
+    WIDTH, HEIGHT = 3508, 2480
+
+    def rendered(self, with_label_background=False):
+        """A real Qt SVG, painted the way a map renderer paints a label pass."""
+        buffer, generator = layout_items.svg_device(self.WIDTH, self.HEIGHT)
+        painter = QtGui.QPainter(generator)
+        painter.fillRect(QtCore.QRectF(0, 0, self.WIDTH, self.HEIGHT), QtGui.QColor(0, 0, 0, 0))
+        for _ in range(3):  # one pass per layer, most with nothing to draw
+            painter.save()
+            painter.setPen(QtGui.QColor('#333333'))
+            painter.restore()
+        if with_label_background:
+            painter.fillRect(QtCore.QRectF(480, 460, 200, 60), QtGui.QColor('#ffffff'))
+        painter.save()
+        painter.setPen(QtGui.QColor('#111111'))
+        painter.drawText(QtCore.QPointF(500, 500), 'France')
+        painter.restore()
+        painter.end()
+        return ''.join(layout_items.closed_content(buffer, canvas=(self.WIDTH, self.HEIGHT)))
+
+    def test_the_canvas_sized_background_is_gone(self):
+        self.assertNotIn('<rect', self.rendered())
+
+    def test_no_empty_group_is_left(self):
+        import re as regular
+        self.assertIsNone(regular.search(r'<g\b[^>]*>\s*</g>', self.rendered()))
+
+    def test_the_label_itself_is_kept(self):
+        self.assertIn('France', self.rendered())
+
+    def test_a_label_background_smaller_than_the_canvas_is_kept(self):
+        self.assertIn('<rect', self.rendered(with_label_background=True))
+
+    def test_nested_empty_groups_disappear_all_the_way_up(self):
+        nested = '<g a="1"><g b="2"><g c="3"> </g></g></g><text>x</text>'
+        self.assertEqual(layout_items.without_empty_groups(nested), '<text>x</text>')
+
+    def test_transparent_sheets_go_whatever_their_size(self):
+        # Three passes clearing with transparent rectangles, one of them inside a
+        # scaled group so its width attribute no longer matches the canvas.
+        buffer, generator = layout_items.svg_device(self.WIDTH, self.HEIGHT)
+        painter = QtGui.QPainter(generator)
+        for scale in (1.0, 0.5, 0.25):
+            painter.save()
+            painter.scale(scale, scale)
+            painter.fillRect(QtCore.QRectF(0, 0, 1000, 700), QtGui.QColor(0, 0, 0, 0))
+            painter.restore()
+        painter.setPen(QtGui.QColor('#111111'))
+        painter.drawText(QtCore.QPointF(500, 500), 'Bretagne')
+        painter.end()
+        content = ''.join(layout_items.closed_content(buffer, canvas=(self.WIDTH, self.HEIGHT)))
+        self.assertNotIn('<rect', content)
+        self.assertIn('Bretagne', content)
+
+    def opaque_sheets(self, scales, label_background=None):
+        """Opaque white sheets over the whole canvas, one per scaled pass, plus a label."""
+        buffer, generator = layout_items.svg_device(self.WIDTH, self.HEIGHT)
+        painter = QtGui.QPainter(generator)
+        for scale in scales:
+            painter.save()
+            painter.scale(scale, scale)
+            painter.fillRect(QtCore.QRectF(0, 0, self.WIDTH / scale, self.HEIGHT / scale),
+                             QtGui.QColor('#ffffff'))
+            painter.restore()
+        if label_background is not None:
+            painter.save()
+            painter.scale(label_background, label_background)
+            painter.fillRect(QtCore.QRectF(0, 0, 4000, 300), QtGui.QColor('#ffffff'))
+            painter.restore()
+        painter.setPen(QtGui.QColor('#111111'))
+        painter.drawText(QtCore.QPointF(500, 500), 'Finistère')
+        painter.end()
+        return ''.join(layout_items.closed_content(buffer, canvas=(self.WIDTH, self.HEIGHT)))
+
+    def test_opaque_sheets_go_whether_their_group_shrinks_or_enlarges_them(self):
+        content = self.opaque_sheets((0.25, 1.0, 4.0))
+        self.assertNotIn('<rect', content)
+        self.assertIn('Finistère', content)
+
+    def test_a_label_background_in_a_shrunk_group_is_kept(self):
+        # 4000 px wide as written, 1000 px on the canvas: a label, not a sheet.
+        content = self.opaque_sheets((1.0,), label_background=0.25)
+        self.assertIn('<rect', content)
+
+    def test_a_path_covering_the_canvas_goes_too(self):
+        content = '<g fill="#ffffff" transform="matrix(1,0,0,1,0,0)"><path d="M0,0 L3508,0 ' \
+                  'L3508,2480 L0,2480 Z"/></g><text>x</text>'
+        self.assertNotIn('<path', layout_items.without_backgrounds(content, 3508, 2480))
+
+    def test_the_group_scale_is_read_from_its_matrix(self):
+        self.assertEqual(layout_items.group_scale('transform="matrix(0.25,0,0,4,0,0)"'),
+                         (0.25, 4.0))
+        self.assertEqual(layout_items.group_scale('fill="#fff"'), (1.0, 1.0))
+
+    @staticmethod
+    def embedded(image):
+        import base64 as encoding
+        buffer = QtCore.QBuffer()
+        buffer.open(QtCore.QIODevice.WriteOnly)
+        image.save(buffer, 'PNG')
+        data = encoding.b64encode(bytes(buffer.data())).decode('ascii')
+        return ('<g fill="none" transform="matrix(1,0,0,1,0,0)"><image x="0" y="0" '
+                'width="350" height="248" preserveAspectRatio="none" '
+                'xlink:href="data:image/png;base64,{0}"/></g>'.format(data))
+
+    @staticmethod
+    def canvas_image():
+        image = QtGui.QImage(350, 248, QtGui.QImage.Format_ARGB32_Premultiplied)
+        image.fill(QtCore.Qt.transparent)
+        return image
+
+    def test_an_empty_intermediate_image_is_removed_with_its_group(self):
+        # One per labelled layer: the case reported, canvas-sized and blank.
+        content = self.embedded(self.canvas_image()) + '<text>Mali</text>'
+        cleaned = layout_items.without_empty_groups(layout_items.without_blank_images(content))
+        self.assertNotIn('<image', cleaned)
+        self.assertNotIn('<g', cleaned)
+        self.assertIn('Mali', cleaned)
+
+    def test_an_image_showing_a_visible_pixel_is_kept(self):
+        image = self.canvas_image()
+        image.setPixelColor(10, 10, QtGui.QColor(0, 0, 0, 200))
+        self.assertIn('<image', layout_items.without_blank_images(self.embedded(image)))
+
+    def test_a_pixel_just_at_the_visibility_threshold_is_kept(self):
+        image = self.canvas_image()
+        image.setPixelColor(10, 10, QtGui.QColor(0, 0, 0, layout_items.VISIBLE_ALPHA))
+        self.assertIn('<image', layout_items.without_blank_images(self.embedded(image)))
+
+    def test_a_residue_nobody_can_see_is_removed(self):
+        # The case reported: an image kept for a few near-transparent pixels.
+        image = self.canvas_image()
+        for x in range(0, 350, 7):
+            image.setPixelColor(x, 120, QtGui.QColor(0, 0, 0, layout_items.VISIBLE_ALPHA - 1))
+        self.assertNotIn('<image', layout_items.without_blank_images(self.embedded(image)))
+
+    def test_a_faint_shadow_with_a_dense_core_is_kept(self):
+        image = self.canvas_image()
+        for x, alpha in ((20, 2), (21, 30), (22, 140), (23, 30), (24, 2)):
+            image.setPixelColor(x, 50, QtGui.QColor(0, 0, 0, alpha))
+        self.assertIn('<image', layout_items.without_blank_images(self.embedded(image)))
+
+    @staticmethod
+    def white_sheet(width=350, height=248):
+        image = QtGui.QImage(width, height, QtGui.QImage.Format_ARGB32_Premultiplied)
+        image.fill(QtGui.QColor('#ffffff'))
+        return image
+
+    def sized(self, image, width, height):
+        return self.embedded(image).replace('width="350" height="248"',
+                                             'width="{0}" height="{1}"'.format(width, height))
+
+    def test_an_opaque_white_sheet_over_the_labels_canvas_is_removed(self):
+        # The case reported: a layer QGIS flattened into a uniform white image.
+        content = self.embedded(self.white_sheet()) + '<text>Niger</text>'
+        cleaned = layout_items.without_blank_images(content, canvas=(350, 248))
+        self.assertNotIn('<image', cleaned)
+        self.assertIn('Niger', cleaned)
+
+    def test_the_same_sheet_is_kept_outside_the_labels_render(self):
+        # Without a canvas — a legend, say — a white image may be meant.
+        content = self.embedded(self.white_sheet())
+        self.assertIn('<image', layout_items.without_blank_images(content))
+
+    def test_an_opaque_image_with_a_drawing_is_kept(self):
+        image = self.white_sheet()
+        image.setPixelColor(100, 100, QtGui.QColor('#222222'))
+        cleaned = layout_items.without_blank_images(self.embedded(image), canvas=(350, 248))
+        self.assertIn('<image', cleaned)
+
+    def test_a_uniform_image_smaller_than_the_canvas_is_kept(self):
+        content = self.sized(self.white_sheet(), 100, 60)
+        self.assertIn('<image', layout_items.without_blank_images(content, canvas=(350, 248)))
+
+    def test_uniformity_is_judged_on_every_pixel(self):
+        pixels = b'\xff\xff\xff\xff' * 1000
+        self.assertTrue(layout_items.uniform(pixels))
+        self.assertFalse(layout_items.uniform(pixels[:-4] + b'\xfe\xff\xff\xff'))
+
+    def test_an_undecodable_image_is_kept_rather_than_guessed_blank(self):
+        content = ('<image x="0" y="0" width="1" height="1" '
+                   'xlink:href="data:image/png;base64,not-base64!!"/>')
+        self.assertEqual(layout_items.without_blank_images(content), content)
+
+    def test_a_visible_shape_survives_even_when_it_is_large(self):
+        buffer, generator = layout_items.svg_device(self.WIDTH, self.HEIGHT)
+        painter = QtGui.QPainter(generator)
+        painter.fillRect(QtCore.QRectF(0, 0, 1000, 700), QtGui.QColor('#88aacc'))
+        painter.end()
+        self.assertIn('<rect', ''.join(layout_items.closed_content(buffer)))
+
+    def test_a_legend_background_is_never_mistaken_for_a_canvas(self):
+        # The legend path does not ask for backgrounds to be dropped.
+        buffer, generator = layout_items.svg_device(400, 200)
+        painter = QtGui.QPainter(generator)
+        painter.fillRect(QtCore.QRectF(0, 0, 400, 200), QtGui.QColor('#ffffff'))
+        painter.end()
+        self.assertIn('<rect', ''.join(layout_items.closed_content(buffer)))
+
+
+class TextFormat(unittest.TestCase):
+    """Legend text must come out as text, and the layout setting be left as found."""
+
+    class Context:
+        def __init__(self):
+            self.format = 'outlines'
+            self.during = None
+
+        def textRenderFormat(self):
+            return self.format
+
+        def setTextRenderFormat(self, value):
+            self.format = value
+
+    def test_text_is_requested_as_text_while_painting(self):
+        context = self.Context()
+        with layout_items.text_kept_as_text(context):
+            context.during = context.format
+        self.assertEqual(context.during, layout_items.TEXT_AS_TEXT)
+
+    def test_the_layout_setting_is_restored_afterwards(self):
+        context = self.Context()
+        with layout_items.text_kept_as_text(context):
+            pass
+        self.assertEqual(context.format, 'outlines')
+
+    def test_restored_even_when_painting_fails(self):
+        context = self.Context()
+        with self.assertRaises(RuntimeError):
+            with layout_items.text_kept_as_text(context):
+                raise RuntimeError('paint failed')
+        self.assertEqual(context.format, 'outlines')
+
+    def test_a_context_without_the_setting_is_left_alone(self):
+        with layout_items.text_kept_as_text(object()):
+            pass
+
+
+class PointMarkers(unittest.TestCase):
+    point = Point(0, 0)
+
+    def test_each_point_gets_a_copy_of_the_class_marker(self):
+        geometry = types.SimpleNamespace(asMultiPoint=lambda: [self.point, self.point])
+        pieces = writer().point_pieces(geometry, 0.8, '<path d="M0,0L1,1"/>')
+        self.assertEqual(len(pieces), 2)
+        self.assertTrue(all(piece.startswith('<g transform="translate(') for piece in pieces))
+        self.assertTrue(all('<path d="M0,0L1,1"/>' in piece for piece in pieces))
+
+    def test_without_a_marker_a_circle_is_written(self):
+        geometry = types.SimpleNamespace(asMultiPoint=lambda: [self.point])
+        pieces = writer().point_pieces(geometry, 0.8)
+        self.assertTrue(pieces[0].startswith('<circle'))
+
+    def test_a_heatmap_layer_is_drawn_as_an_image(self):
+        class Layer(core_vector_layer()):
+            def renderer(self):
+                return types.SimpleNamespace(type=lambda: 'heatmapRenderer')
+
+        self.assertTrue(module.ExportLayoutSvg.drawn_as_image(Layer()))
+
+    def test_an_ordinary_layer_is_not(self):
+        class Layer(core_vector_layer()):
+            def renderer(self):
+                return types.SimpleNamespace(type=lambda: 'RuleRenderer')
+
+        self.assertFalse(module.ExportLayoutSvg.drawn_as_image(Layer()))
+
+
+def core_vector_layer():
+    return sys.modules['qgis.core'].QgsVectorLayer
+
+
+class Legends(unittest.TestCase):
+    """A legend is painted by the item itself into a real SVG generator."""
+
+    class RenderContext:
+        """As in QGIS: the preview flag can be read, not set from Python."""
+
+        def isPreviewRender(self):
+            return True
+
+    class Item:
+        """Paints a framed rectangle and a label, as a legend would."""
+
+        def __init__(self):
+            self.context = Legends.RenderContext()
+            self.scale_seen = None
+
+        def rect(self):
+            return QtCore.QRectF(0, 0, 40, 20)
+
+        def layout(self):
+            return types.SimpleNamespace(renderContext=lambda: self.context)
+
+        def paint(self, painter, option, widget):
+            self.scale_seen = painter.worldTransform().m11()
+            painter.setPen(QtGui.QPen(QtGui.QColor('#000000'), 0.2))
+            painter.setBrush(QtGui.QColor('#ddeeff'))
+            painter.drawRect(QtCore.QRectF(0, 0, 40, 20))
+            painter.drawText(QtCore.QPointF(4, 12), 'Pays de la Loire & Bretagne')
+
+    def painted(self):
+        item = self.Item()
+        return layout_items.painted_fragment(item, 1.0), item
+
+    def test_paints_without_needing_to_change_the_render_mode(self):
+        # QgsLayoutRenderContext has no public setIsPreviewRender: painting must
+        # not depend on it.
+        self.assertFalse(hasattr(self.RenderContext(), 'setIsPreviewRender'))
+        elements, _ = self.painted()
+        self.assertTrue(elements)
+
+    def test_paints_at_print_resolution(self):
+        _, item = self.painted()
+        self.assertAlmostEqual(item.scale_seen, layout_items.DOTS_PER_MILLIMETRE, 6)
+
+    def test_the_fragment_keeps_the_text_the_item_drew(self):
+        elements, _ = self.painted()
+        self.assertTrue(any('Pays de la Loire' in element for element in elements))
+
+    def test_the_grafted_group_is_well_formed_and_placed(self):
+        elements, _ = self.painted()
+        group = layout_items.graft('legende', 'Legend', 'matrix(1,0,0,1,20,150)', elements)
+        root = ElementTree.fromstring(''.join(group))
+        self.assertEqual(root.get('id'), 'legende')
+        self.assertIn('scale(', root.get('transform'))
+
+    def test_the_slice_drops_the_generator_title_and_wrapper(self):
+        data = (b'<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="1">'
+                b'<title>Qt SVG Document</title><desc>Generated</desc>'
+                b'<g fill="#fff"><rect width="2" height="2"/></g></svg>\n')
+        content = ''.join(layout_items.fragment_content(data))
+        self.assertIn('<rect', content)
+        self.assertNotIn('<title>', content)
+        self.assertNotIn('<desc>', content)
+        self.assertNotIn('<svg', content)
+
+    def test_a_document_that_is_not_svg_gives_nothing(self):
+        self.assertEqual(layout_items.fragment_content(b'<html></html>'), [])
+
+    def test_the_whole_document_stays_well_formed_with_a_legend(self):
+        elements, _ = self.painted()
+        legend = layout_items.graft('legende', 'Legend', 'matrix(1,0,0,1,20,150)', elements)
+        frame = {'page': (297.0, 210.0), 'placement': 'matrix(1,0,0,1,0,0)',
+                 'map_rotation': 0.0}
+        ElementTree.fromstring(module.ExportLayoutSvg.document(frame, [], (), '', legend))
+
+    def test_an_empty_fragment_writes_nothing(self):
+        self.assertEqual(layout_items.graft('legende', 'Legend', 'matrix(1,0,0,1,0,0)', []), [])
+
+
 class Document(unittest.TestCase):
     frame = {'page': (297.0, 210.0), 'placement': 'matrix(1,0,0,1,10,20)',
              'map_rotation': 0.0}
@@ -640,6 +1056,24 @@ class Document(unittest.TestCase):
         groups = [child.get('id') for child in root
                   if child.tag.endswith('g')]
         self.assertEqual(groups, ['carte', 'echelle'])
+
+    def test_labels_sit_just_above_the_map_and_under_the_rest(self):
+        labels = ['<g id="etiquettes" transform="matrix(1,0,0,1,0,0) scale(0.1)">', '</g>']
+        scale = ['<g id="echelle">', '</g>']
+        legend = ['<g id="legende">', '</g>']
+        text = module.ExportLayoutSvg.document(self.frame, self.body(), scale, '', legend,
+                                               labels)
+        root = ElementTree.fromstring(text)
+        groups = [child.get('id') for child in root if child.tag.endswith('g')]
+        self.assertEqual(groups, ['carte', 'etiquettes', 'echelle', 'legende'])
+
+    def test_legends_sit_on_the_page_beside_the_map_and_the_scale_bar(self):
+        scale = ['<g id="echelle">', '</g>']
+        legend = ['<g id="legende" transform="matrix(1,0,0,1,0,0) scale(0.1)">', '</g>']
+        text = module.ExportLayoutSvg.document(self.frame, self.body(), scale, '', legend)
+        root = ElementTree.fromstring(text)
+        groups = [child.get('id') for child in root if child.tag.endswith('g')]
+        self.assertEqual(groups, ['carte', 'echelle', 'legende'])
 
     def test_page_size_is_in_millimetres_and_matches_the_view_box(self):
         text = module.ExportLayoutSvg.document(self.frame, self.body())

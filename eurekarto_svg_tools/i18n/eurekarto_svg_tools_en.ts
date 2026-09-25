@@ -115,8 +115,12 @@
       <translation>Labels</translation>
     </message>
     <message>
-      <source>Labels embedded, as text where the labelling allows it.</source>
-      <translation>Labels embedded, as text where the labelling allows it.</translation>
+      <source>Labels could not be split by layer ({0}); they are written together.</source>
+      <translation>Labels could not be split by layer ({0}); they are written together.</translation>
+    </message>
+    <message>
+      <source>Labels embedded for {0} layers, as text where the labelling allows it.</source>
+      <translation>Labels embedded for {0} layers, as text where the labelling allows it.</translation>
     </message>
     <message>
       <source>Latitude {0}° is not on the map: no bar for it.</source>
@@ -387,6 +391,10 @@
       <translation>The map frame outline is invalid.</translation>
     </message>
     <message>
+      <source>The symbol of class "{0}" uses an effect QGIS can only draw as an image (a blend mode, a shadow, a shapeburst fill): it is embedded as one. Remove the effect for editable vectors.</source>
+      <translation>The symbol of class "{0}" uses an effect QGIS can only draw as an image (a blend mode, a shadow, a shapeburst fill): it is embedded as one. Remove the effect for editable vectors.</translation>
+    </message>
+    <message>
       <source>The symbology could not be released: {0}</source>
       <translation>The symbology could not be released: {0}</translation>
     </message>
@@ -405,6 +413,10 @@
     <message>
       <source>class</source>
       <translation>class</translation>
+    </message>
+    <message>
+      <source>default</source>
+      <translation>default</translation>
     </message>
     <message>
       <source>measurement refused ({0})</source>

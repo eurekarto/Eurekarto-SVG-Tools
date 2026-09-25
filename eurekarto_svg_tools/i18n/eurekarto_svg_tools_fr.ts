@@ -115,8 +115,12 @@
       <translation>Étiquettes</translation>
     </message>
     <message>
-      <source>Labels embedded, as text where the labelling allows it.</source>
-      <translation>Étiquettes intégrées, en texte lorsque l’étiquetage le permet.</translation>
+      <source>Labels could not be split by layer ({0}); they are written together.</source>
+      <translation>Les étiquettes n’ont pas pu être séparées par couche ({0}) : elles sont écrites ensemble.</translation>
+    </message>
+    <message>
+      <source>Labels embedded for {0} layers, as text where the labelling allows it.</source>
+      <translation>Étiquettes intégrées pour {0} couches, en texte lorsque l’étiquetage le permet.</translation>
     </message>
     <message>
       <source>Latitude {0}° is not on the map: no bar for it.</source>
@@ -387,6 +391,10 @@
       <translation>Le contour du cadre de carte est invalide.</translation>
     </message>
     <message>
+      <source>The symbol of class "{0}" uses an effect QGIS can only draw as an image (a blend mode, a shadow, a shapeburst fill): it is embedded as one. Remove the effect for editable vectors.</source>
+      <translation>Le symbole de la classe « {0} » utilise un effet que QGIS ne sait dessiner qu’en image (mode de fusion, ombre, remplissage shapeburst) : il est intégré ainsi. Retirez l’effet pour obtenir du vectoriel éditable.</translation>
+    </message>
+    <message>
       <source>The symbology could not be released: {0}</source>
       <translation>La symbologie n’a pas pu être libérée : {0}</translation>
     </message>
@@ -405,6 +413,10 @@
     <message>
       <source>class</source>
       <translation>classe</translation>
+    </message>
+    <message>
+      <source>default</source>
+      <translation>par défaut</translation>
     </message>
     <message>
       <source>measurement refused ({0})</source>

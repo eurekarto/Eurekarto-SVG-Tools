@@ -35,7 +35,8 @@ from qgis.core import (
 
 from .common import enum as _enum, number, tr, xml_text
 from .layout_items import (DOTS_PER_MILLIMETRE, graft, marker_fragment,
-                           painted_fragment, painted_labels)
+                           labels_by_layer, painted_fragment, painted_labels,
+                           placed_marker, single_group)
 from .scale_bar import ScaleBar, ellipsoid_of, latitudes_of
 
 
@@ -401,9 +402,9 @@ class FrameWriter:
         for point in geometry.asMultiPoint():
             x, y = self.to_frame(point)
             if marker:
-                pieces.append('<g transform="translate({0},{1}) scale({2})">{3}</g>'.format(
+                pieces.append(placed_marker(marker, 'translate({0},{1}) scale({2})'.format(
                     number(x, self.precision), number(y, self.precision),
-                    number(1.0 / DOTS_PER_MILLIMETRE, 9), marker))
+                    number(1.0 / DOTS_PER_MILLIMETRE, 9))))
             else:
                 pieces.append('<circle cx="{0}" cy="{1}" r="{2}"/>'.format(
                     number(x, self.precision), number(y, self.precision), number(radius, 3)))
@@ -1120,17 +1121,29 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         return 'code', code
 
     @staticmethod
-    def marker_of(symbol, geometry_type, feedback):
-        """The class marker drawn by QGIS, or None and a warning when it cannot be."""
+    def marker_of(symbol, geometry_type, label, feedback):
+        """The class marker drawn by QGIS as vectors, or None and a warning.
+
+        Rendering asks QGIS for vector output, so a plain marker comes out as
+        paths. An effect it cannot compose that way — a blend mode, a shadow —
+        still forces an image, and that is worth saying rather than embedding
+        quietly.
+        """
         if symbol is None or geometry_type != GEOMETRY_POINT:
             return None
         try:
-            return marker_fragment(symbol) or None
+            fragment = marker_fragment(symbol) or None
         except Exception as error:
             feedback.pushWarning(
                 tr('A point symbol could not be drawn, circles are used instead: {0}')
                 .format(error))
             return None
+        if fragment and '<image' in fragment:
+            feedback.pushWarning(tr(
+                'The symbol of class "{0}" uses an effect QGIS can only draw as an image '
+                '(a blend mode, a shadow, a shapeburst fill): it is embedded as one. '
+                'Remove the effect for editable vectors.').format(label or tr('default')))
+        return fragment
 
     def class_slot(self, classes, key, order, label, symbol, geometry_type, options,
                    invisible=False, feedback=None):
@@ -1147,7 +1160,7 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
                             'attributes': attributes, 'radius': radius, 'flat': [],
                             'stroke': 'stroke="none"' not in attributes,
                             'marker': None if invisible or feedback is None
-                            else self.marker_of(symbol, geometry_type, feedback)}
+                            else self.marker_of(symbol, geometry_type, label, feedback)}
         return classes[key]
 
     @classmethod
@@ -1305,6 +1318,20 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
             identifier, xml_text(label), (' ' + attributes) if attributes else ''),
             '<title>{0}</title>'.format(xml_text(label))]
 
+    def named_group(self, identifier, label, pieces):
+        """A named group holding a single marker carries it, rather than wrapping it.
+
+        The marker already needs a group for its placement and its style. Giving
+        it a second one just to carry the name leaves the drawing two levels deep
+        in Illustrator for nothing.
+        """
+        parts = single_group(''.join(pieces)) if len(pieces) == 1 else None
+        if parts is None:
+            return self.group_element(identifier, label) + list(pieces) + ['</g>']
+        attributes, inside = parts
+        return ['<g id="{0}" data-name="{1}"{2}>'.format(identifier, xml_text(label), attributes),
+                '<title>{0}</title>'.format(xml_text(label)), inside, '</g>']
+
     def layer_body(self, layer, classes, used, join_field, feedback):
         """SVG for one vector layer: class groups, named groups, loose shapes."""
         ordered = [slot for slot in sorted(classes.values(), key=lambda one: one['order'])
@@ -1323,9 +1350,8 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
                     xml_identifier(slot['label'] or tr('class'), used),
                     slot['label'], slot['attributes'])
             for label in sorted(slot['groups'], key=lambda value: (value.casefold(), value)):
-                body += self.group_element(xml_identifier(label, used), label)
-                body += slot['groups'][label]
-                body.append('</g>')
+                body += self.named_group(xml_identifier(label, used), label,
+                                         slot['groups'][label])
             body += slot['flat']
             if not single:
                 body.append('</g>')
@@ -1379,20 +1405,44 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         return description or authid or ''
 
     def labels_of(self, parameters, context, item, frame, used, feedback):
-        """The labels of the map frame, placed by QGIS's own labelling engine."""
+        """The labels of the map frame, placed by QGIS's own labelling engine.
+
+        They are asked for layer by layer, so each layer keeps its own group,
+        while the labelling engine still settles collisions over the whole map.
+        """
         if not self.parameterAsBool(parameters, self.LABELS, context):
             return []
         try:
-            elements = painted_labels(item, frame['size'])
+            drawings = labels_by_layer(item, frame['size'])
+        except Exception as error:
+            feedback.pushInfo(tr('Labels could not be split by layer ({0}); they are '
+                                 'written together.').format(error))
+            drawings = [('', element) for element in self.all_labels(item, frame, feedback)]
+        if not drawings:
+            feedback.pushInfo(tr('No label is shown in the map frame.'))
+            return []
+        inner = []
+        for layer_id, drawing in drawings:
+            layer = context.project().mapLayer(layer_id) if layer_id else None
+            if layer is None:
+                inner.append(drawing)
+                continue
+            inner += ['<g id="{0}" data-name="{1}">'.format(
+                xml_identifier('etiquettes_' + layer.name(), used), xml_text(layer.name())),
+                drawing, '</g>']
+        feedback.pushInfo(tr('Labels embedded for {0} layers, as text where the labelling '
+                             'allows it.').format(sum(1 for one, _ in drawings if one)))
+        return graft(xml_identifier('etiquettes', used), xml_text(tr('Labels')),
+                     frame['placement'], inner)
+
+    @staticmethod
+    def all_labels(item, frame, feedback):
+        """Every label in one drawing, for a QGIS that cannot split them by layer."""
+        try:
+            return painted_labels(item, frame['size'])
         except Exception as error:
             feedback.pushWarning(tr('The labels could not be rendered: {0}').format(error))
             return []
-        if not elements:
-            feedback.pushInfo(tr('No label is shown in the map frame.'))
-            return []
-        feedback.pushInfo(tr('Labels embedded, as text where the labelling allows it.'))
-        return graft(xml_identifier('etiquettes', used), xml_text(tr('Labels')),
-                     frame['placement'], elements)
 
     def legends_of(self, parameters, context, layout, item, used, feedback):
         """Every visible legend on the map frame's page, painted by QGIS itself."""

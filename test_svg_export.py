@@ -129,6 +129,7 @@ def install_stubs():
         MapSettingsFlag=types.SimpleNamespace(DrawLabeling=1, SkipSymbolRendering=2,
                                               ForceVectorOutput=4),
         TextRenderFormat=types.SimpleNamespace(AlwaysText=1),
+        RenderContextFlag=types.SimpleNamespace(ForceVectorOutput=8),
         SymbolType=types.SimpleNamespace(Fill='fill', Line='line', Marker='marker'),
         GeometryType=types.SimpleNamespace(Polygon='polygon', Line='line', Point='point'),
         WkbType=types.SimpleNamespace(GeometryCollection='GeometryCollection'),
@@ -148,6 +149,9 @@ def install_stubs():
         def collectGeometry(parts):
             return Geometry([polygon for part in parts for polygon in part.polygons])
 
+    core.QgsLayoutRenderContext = type('QgsLayoutRenderContext', (), {
+        'Flag': types.SimpleNamespace(FlagForceVectorOutput=16),
+        'FlagForceVectorOutput': 16})
     core.QgsGeometry = QgsGeometry
     core.QgsPointXY = Point
     core.QgsWkbTypes = types.SimpleNamespace(
@@ -185,6 +189,7 @@ def install_stubs():
                  'QgsProcessingParameterMatrix', 'QgsProcessingParameterMultipleLayers',
                  'QgsProcessingParameterString', 'QgsProcessingParameterVectorLayer',
                  'QgsLayoutItemLegend', 'QgsMapRendererCustomPainterJob',
+                 'QgsLabelBlockingRegion', 'QgsMapRendererParallelJob', 'QgsPointXY',
                  'QgsRenderContext', 'QgsVectorLayer'):
         setattr(core, name, type(name, (Exception,), {}))
 
@@ -205,7 +210,7 @@ def install_stubs():
 
 install_stubs()
 from eurekarto_svg_tools import layout_items  # noqa: E402
-from eurekarto_svg_tools import scale_bar  # noqa: E402
+from eurekarto_svg_tools import scale_bar  # noqa: E402,F401
 from eurekarto_svg_tools import svg_export as module  # noqa: E402
 
 
@@ -340,7 +345,7 @@ class VertexReduction(unittest.TestCase):
         frame = writer(max_vertices=10000)
         frame.max_tolerance = 0.02
         stats = self.stats()
-        reduced = frame.reduce_vertices(self.dense(40000), 'polygon', stats)
+        frame.reduce_vertices(self.dense(40000), 'polygon', stats)
         self.assertLessEqual(stats['tolerance'], 0.02)
         self.assertTrue(stats['simplified'] or stats['over'])
 
@@ -823,8 +828,8 @@ class LabelTidying(unittest.TestCase):
         return image
 
     def sized(self, image, width, height):
-        return self.embedded(image).replace('width="350" height="248"',
-                                             'width="{0}" height="{1}"'.format(width, height))
+        return self.embedded(image).replace(
+            'width="350" height="248"', 'width="{0}" height="{1}"'.format(width, height))
 
     def test_an_opaque_white_sheet_over_the_labels_canvas_is_removed(self):
         # The case reported: a layer QGIS flattened into a uniform white image.
@@ -874,6 +879,296 @@ class LabelTidying(unittest.TestCase):
         self.assertIn('<rect', ''.join(layout_items.closed_content(buffer)))
 
 
+class Flattening(unittest.TestCase):
+    """One group per marker, not the stack Qt and the placement would leave."""
+
+    @staticmethod
+    def groups(text):
+        import re as regular
+        return len(regular.findall(r'<g\b', text))
+
+    def qt_marker(self):
+        """A marker painted by Qt, nested exactly as it writes it."""
+        buffer, generator = layout_items.svg_device(120, 120, 60)
+        painter = QtGui.QPainter(generator)
+        painter.setBrush(QtGui.QColor('#e05a3c'))
+        painter.setPen(QtGui.QPen(QtGui.QColor('#222222'), 0.6))
+        painter.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(0, -20), QtCore.QPointF(18, 14),
+                                             QtCore.QPointF(-18, 14)]))
+        painter.end()
+        return ''.join(layout_items.closed_content(buffer))
+
+    def test_a_placed_marker_is_a_single_group(self):
+        placed = layout_items.placed_marker(layout_items.flattened(self.qt_marker()),
+                                            'translate(10,20) scale(0.1)')
+        self.assertEqual(self.groups(placed), 1)
+
+    def test_the_drawing_and_its_colours_survive(self):
+        placed = layout_items.placed_marker(layout_items.flattened(self.qt_marker()),
+                                            'translate(10,20) scale(0.1)')
+        self.assertIn('<path', placed)
+        self.assertIn('#e05a3c', placed)
+        self.assertIn('#222222', placed)
+
+    def test_the_placement_comes_first_and_identity_is_dropped(self):
+        placed = layout_items.placed_marker(
+            '<g transform="matrix(1,0,0,1,0,0)"><path d="M0,0"/></g>', 'translate(10,20)')
+        self.assertIn('transform="translate(10,20)"', placed)
+        self.assertNotIn('matrix(1,0,0,1,0,0)', placed)
+
+    def test_transforms_that_matter_are_kept_in_order(self):
+        placed = layout_items.placed_marker('<g transform="rotate(30)"><path d="M0,0"/></g>',
+                                            'translate(10,20)')
+        self.assertIn('transform="translate(10,20) rotate(30)"', placed)
+
+    def test_the_inner_style_wins_over_the_outer(self):
+        merged = layout_items.flattened(
+            '<g fill="none" stroke="black"><g fill="#ff0000"><path d="M0,0"/></g></g>')
+        self.assertIn('fill="#ff0000"', merged)
+        self.assertNotIn('fill="none"', merged)
+
+    def test_a_group_with_several_children_is_left_alone(self):
+        # Two shapes side by side belong together: merging would change the drawing.
+        content = '<g fill="red"><path d="M0,0"/><path d="M1,1"/></g>'
+        self.assertEqual(self.groups(layout_items.flattened(content)), 1)
+        self.assertEqual(layout_items.flattened(content).count('<path'), 2)
+
+    def test_text_inside_a_marker_is_preserved(self):
+        content = '<g fill="black"><g><text x="0" y="0">A</text></g></g>'
+        self.assertIn('>A</text>', layout_items.flattened(content))
+
+    def test_unbalanced_content_is_returned_untouched(self):
+        broken = '<g fill="red"><path d="M0,0"/>'
+        self.assertEqual(layout_items.flattened(broken), broken)
+
+
+class BlockingRegions(unittest.TestCase):
+    """Without the staged job, the other layers' labels become obstacles."""
+
+    @staticmethod
+    def position(layer_id, corners, callable_corners=False):
+        if callable_corners:
+            return types.SimpleNamespace(layerID=layer_id, cornerPoints=lambda: corners)
+        return types.SimpleNamespace(layerID=layer_id, cornerPoints=corners)
+
+    def test_only_the_other_layers_block_the_way(self):
+        square = [(0, 0), (1, 0), (1, 1), (0, 1)]
+        positions = [self.position('towns', square), self.position('rivers', square),
+                     self.position('rivers', square)]
+        self.assertEqual(len(layout_items.blocking_corners(positions, 'towns')), 2)
+        self.assertEqual(len(layout_items.blocking_corners(positions, 'rivers')), 1)
+
+    def test_corners_are_read_whether_they_are_a_list_or_a_call(self):
+        square = [(0, 0), (1, 0), (1, 1), (0, 1)]
+        self.assertEqual(layout_items.corner_points(self.position('a', square)), square)
+        self.assertEqual(
+            layout_items.corner_points(self.position('a', square, callable_corners=True)), square)
+
+    def test_a_label_without_corners_is_ignored(self):
+        positions = [self.position('towns', []), self.position('towns', [(0, 0), (1, 1)])]
+        self.assertEqual(layout_items.blocking_corners(positions, 'rivers'), [])
+
+    def test_the_route_is_refused_when_the_classes_are_missing(self):
+        saved = layout_items.QgsLabelBlockingRegion
+        layout_items.QgsLabelBlockingRegion = None
+        try:
+            with self.assertRaises(RuntimeError):
+                layout_items.labels_by_blocking(None, (297.0, 210.0))
+        finally:
+            layout_items.QgsLabelBlockingRegion = saved
+
+
+class OlderQgis(unittest.TestCase):
+    """The plugin must load on a QGIS that lacks the staged render job."""
+
+    def test_the_module_imports_without_the_staged_job(self):
+        # QGIS 3.40 on macOS does not expose QgsMapRendererStagedRenderJob to Python.
+        self.assertIsNone(layout_items.QgsMapRendererStagedRenderJob)
+        self.assertIsNone(layout_items.STAGE_LABELS)
+        self.assertIsNone(layout_items.LABELS_BY_LAYER)
+
+    def test_splitting_by_layer_falls_back_to_the_blocking_route(self):
+        # Without the staged job it must not crash but try the other route.
+        saved = layout_items.QgsLabelBlockingRegion
+        layout_items.QgsLabelBlockingRegion = None
+        try:
+            with self.assertRaises(RuntimeError):
+                layout_items.labels_by_layer(None, (297.0, 210.0))
+        finally:
+            layout_items.QgsLabelBlockingRegion = saved
+
+    def test_the_export_falls_back_to_one_drawing(self):
+        algorithm = module.ExportLayoutSvg.__new__(module.ExportLayoutSvg)
+        algorithm.parameterAsBool = lambda parameters, name, context: True
+        messages = []
+        feedback = types.SimpleNamespace(pushInfo=messages.append, pushWarning=messages.append)
+        original = module.painted_labels
+        module.painted_labels = lambda item, size: ['<g><text>Paris</text></g>']
+        try:
+            frame = {'size': (297.0, 210.0), 'placement': 'matrix(1,0,0,1,0,0)'}
+            lines = algorithm.labels_of({}, None, None, frame, set(), feedback)
+        finally:
+            module.painted_labels = original
+        text = ''.join(lines)
+        self.assertIn('Paris', text)
+        self.assertIn('id="etiquettes"', text)
+        self.assertTrue(any('couche' in one or 'layer' in one for one in messages))
+
+
+class LabelLayers(unittest.TestCase):
+    """Labels grouped by layer, and the flattening of what Qt wraps around them."""
+
+    def test_a_style_only_wrapper_around_groups_disappears(self):
+        # Exactly what Qt writes around a run of labels.
+        content = ('<g fill="none" stroke="black" stroke-width="1">'
+                   '<g transform="matrix(1,0,0,1,10,20)"><text>Paris</text></g>'
+                   '<g transform="matrix(1,0,0,1,30,40)"><text>Lyon</text></g></g>')
+        flat = layout_items.flattened(content)
+        self.assertEqual(flat.count('<g'), 2)
+        self.assertIn('Paris', flat)
+        self.assertIn('Lyon', flat)
+
+    def test_the_wrapper_style_is_carried_to_each_child(self):
+        content = ('<g stroke="black">'
+                   '<g transform="matrix(1,0,0,1,1,1)"><text>A</text></g>'
+                   '<g transform="matrix(1,0,0,1,2,2)"><text>B</text></g></g>')
+        flat = layout_items.flattened(content)
+        self.assertEqual(flat.count('stroke="black"'), 2)
+
+    def test_a_wrapper_holding_a_shape_is_kept(self):
+        # Pushing the style down would change what an unstyled leaf inherits.
+        content = '<g fill="none" stroke="black"><path d="M0,0"/><g><text>A</text></g></g>'
+        self.assertEqual(layout_items.flattened(content).count('<g'), 2)
+
+    def test_a_wrapper_with_a_transform_is_kept(self):
+        content = ('<g transform="scale(2)"><g transform="translate(1,1)"><text>A</text></g>'
+                   '<g transform="translate(2,2)"><text>B</text></g></g>')
+        self.assertEqual(layout_items.flattened(content).count('<g'), 3)
+
+    def test_labels_are_wrapped_in_one_group_per_layer(self):
+        algorithm = module.ExportLayoutSvg.__new__(module.ExportLayoutSvg)
+        algorithm.parameterAsBool = lambda parameters, name, context: True
+        drawings = [('id1', '<g><text>Paris</text></g>'), ('id2', '<g><text>Seine</text></g>')]
+        names = {'id1': 'Villes', 'id2': 'Rivières'}
+        original = module.labels_by_layer
+        module.labels_by_layer = lambda item, size: drawings
+        context = types.SimpleNamespace(project=lambda: types.SimpleNamespace(
+            mapLayer=lambda key: types.SimpleNamespace(name=lambda: names[key])))
+        messages = []
+        feedback = types.SimpleNamespace(pushInfo=messages.append, pushWarning=messages.append)
+        try:
+            frame = {'size': (297.0, 210.0), 'placement': 'matrix(1,0,0,1,0,0)'}
+            lines = algorithm.labels_of({}, context, None, frame, set(), feedback)
+        finally:
+            module.labels_by_layer = original
+        text = ''.join(lines)
+        self.assertIn('id="etiquettes_Villes"', text)
+        self.assertIn('id="etiquettes_Rivieres"', text)   # accents dropped from identifiers
+        self.assertIn('data-name="Rivières"', text)
+        root = ElementTree.fromstring('<svg xmlns="http://www.w3.org/2000/svg">' + text + '</svg>')
+        self.assertEqual(len(list(root)), 1)
+
+
+class NamedGroups(unittest.TestCase):
+    """A named entity holding one marker must not nest it in a second group."""
+
+    def setUp(self):
+        self.algorithm = module.ExportLayoutSvg.__new__(module.ExportLayoutSvg)
+
+    def test_a_single_marker_is_carried_by_the_named_group(self):
+        marker = ['<g transform="translate(10,20)" fill="#e05a3c"><path d="M0,0"/></g>']
+        lines = self.algorithm.named_group('paris', 'Paris', marker)
+        text = ''.join(lines)
+        self.assertEqual(text.count('<g'), 1)
+        self.assertIn('id="paris"', text)
+        self.assertIn('data-name="Paris"', text)
+        self.assertIn('transform="translate(10,20)"', text)
+        self.assertIn('fill="#e05a3c"', text)
+        self.assertIn('<title>Paris</title>', text)
+        self.assertIn('<path d="M0,0"/>', text)
+
+    def test_several_markers_keep_their_own_groups(self):
+        markers = ['<g transform="translate(1,1)"><path d="M0,0"/></g>',
+                   '<g transform="translate(2,2)"><path d="M0,0"/></g>']
+        text = ''.join(self.algorithm.named_group('lyon', 'Lyon', markers))
+        self.assertEqual(text.count('<g'), 3)
+
+    def test_a_polygon_named_group_is_unchanged(self):
+        text = ''.join(self.algorithm.named_group('fr', 'France', ['<path d="M0,0Z"/>']))
+        self.assertEqual(text.count('<g'), 1)
+        self.assertIn('<path d="M0,0Z"/>', text)
+
+    def test_a_name_with_markup_stays_escaped(self):
+        marker = ['<g transform="translate(1,1)"><path d="M0,0"/></g>']
+        text = ''.join(self.algorithm.named_group('x', 'Saint-Martin & <Cie>', marker))
+        self.assertIn('Saint-Martin &amp; &lt;Cie&gt;', text)
+        self.assertNotIn('<Cie>', text)
+
+
+class VectorOutput(unittest.TestCase):
+    """Symbols must be asked for as vectors, not left to be drawn into an image."""
+
+    class LayoutContext:
+        def __init__(self):
+            self.format = 'outlines'
+            self.raised = 0
+            self.during = None
+
+        def textRenderFormat(self):
+            return self.format
+
+        def setTextRenderFormat(self, value):
+            self.format = value
+
+        def flags(self):
+            return self.raised
+
+        def setFlag(self, flag, value):
+            self.raised = (self.raised | flag) if value else (self.raised & ~flag)
+
+    def test_the_layout_is_asked_for_vector_output(self):
+        context = self.LayoutContext()
+        with layout_items.drawn_as_vectors(context):
+            context.during = bool(context.flags() & layout_items.FORCE_VECTOR_LAYOUT)
+        self.assertTrue(context.during)
+
+    def test_the_layout_flags_are_restored_afterwards(self):
+        context = self.LayoutContext()
+        with layout_items.drawn_as_vectors(context):
+            pass
+        self.assertFalse(context.flags() & layout_items.FORCE_VECTOR_LAYOUT)
+        self.assertEqual(context.format, 'outlines')
+
+    def test_a_context_offering_no_flags_is_left_alone(self):
+        with layout_items.drawn_as_vectors(object()):
+            pass
+
+    def test_a_symbol_still_drawn_as_an_image_is_reported(self):
+        warnings = []
+        feedback = types.SimpleNamespace(pushWarning=warnings.append,
+                                         pushInfo=lambda text: None)
+        original = module.marker_fragment
+        module.marker_fragment = lambda symbol: '<g><image x="0" y="0"/></g>'
+        try:
+            fragment = module.ExportLayoutSvg.marker_of(object(), 'point', 'Villes', feedback)
+        finally:
+            module.marker_fragment = original
+        self.assertIn('<image', fragment)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn('Villes', warnings[0])
+
+    def test_a_vector_symbol_raises_no_warning(self):
+        warnings = []
+        feedback = types.SimpleNamespace(pushWarning=warnings.append)
+        original = module.marker_fragment
+        module.marker_fragment = lambda symbol: '<g><path d="M0,0L1,1"/></g>'
+        try:
+            module.ExportLayoutSvg.marker_of(object(), 'point', 'Villes', feedback)
+        finally:
+            module.marker_fragment = original
+        self.assertEqual(warnings, [])
+
+
 class TextFormat(unittest.TestCase):
     """Legend text must come out as text, and the layout setting be left as found."""
 
@@ -890,25 +1185,25 @@ class TextFormat(unittest.TestCase):
 
     def test_text_is_requested_as_text_while_painting(self):
         context = self.Context()
-        with layout_items.text_kept_as_text(context):
+        with layout_items.drawn_as_vectors(context):
             context.during = context.format
         self.assertEqual(context.during, layout_items.TEXT_AS_TEXT)
 
     def test_the_layout_setting_is_restored_afterwards(self):
         context = self.Context()
-        with layout_items.text_kept_as_text(context):
+        with layout_items.drawn_as_vectors(context):
             pass
         self.assertEqual(context.format, 'outlines')
 
     def test_restored_even_when_painting_fails(self):
         context = self.Context()
         with self.assertRaises(RuntimeError):
-            with layout_items.text_kept_as_text(context):
+            with layout_items.drawn_as_vectors(context):
                 raise RuntimeError('paint failed')
         self.assertEqual(context.format, 'outlines')
 
     def test_a_context_without_the_setting_is_left_alone(self):
-        with layout_items.text_kept_as_text(object()):
+        with layout_items.drawn_as_vectors(object()):
             pass
 
 

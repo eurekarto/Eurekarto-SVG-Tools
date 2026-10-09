@@ -451,6 +451,10 @@
       <translation>the segment spans {0}° of longitude, more than the projection can show in one piece</translation>
     </message>
     <message>
+      <source>size {0} mm</source>
+      <translation>size {0} mm</translation>
+    </message>
+    <message>
       <source>unrepairable geometry</source>
       <translation>unrepairable geometry</translation>
     </message>

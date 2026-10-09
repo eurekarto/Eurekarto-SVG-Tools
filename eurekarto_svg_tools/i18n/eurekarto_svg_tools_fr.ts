@@ -451,6 +451,10 @@
       <translation>le segment couvre {0}° de longitude, plus que ce que la projection peut montrer d’un seul tenant</translation>
     </message>
     <message>
+      <source>size {0} mm</source>
+      <translation>taille {0} mm</translation>
+    </message>
+    <message>
       <source>unrepairable geometry</source>
       <translation>géométrie irréparable</translation>
     </message>

@@ -18,8 +18,9 @@ from qgis.PyQt.QtCore import QBuffer, QIODevice, QPointF, QRectF, QSize, QSizeF
 from qgis.PyQt.QtGui import QColor, QImage, QPainter
 from qgis.PyQt.QtSvg import QSvgGenerator
 from qgis.PyQt.QtWidgets import QStyleOptionGraphicsItem
-from qgis.core import (Qgis, QgsLayoutRenderContext, QgsMapRendererCustomPainterJob,
-                       QgsMapSettings, QgsRenderContext, QgsVectorLayer)
+from qgis.core import (Qgis, QgsExpressionContext, QgsLayoutRenderContext,
+                       QgsMapRendererCustomPainterJob, QgsMapSettings, QgsRenderContext,
+                       QgsVectorLayer)
 
 try:
     # Renders labels layer by layer in one pass. Absent from some builds, QGIS
@@ -453,18 +454,23 @@ def placed_marker(fragment, placement):
     return flattened('<g transform="{0}">{1}</g>'.format(placement, fragment))
 
 
-def marker_fragment(symbol):
+def marker_fragment(symbol, feature=None, expression_context=None, fields=None, size=None):
     """One marker symbol drawn by QGIS around the origin, in pixels at print resolution.
 
     Drawing it once per class and placing a copy at each point keeps every
-    built-in shape, SVG marker and font marker exactly as QGIS draws it. Values
-    driven by data — a size or a rotation read from a field — are not applied:
-    each class shows its symbol as defined.
+    built-in shape, SVG marker and font marker exactly as QGIS draws it. Given a
+    feature and its expression context, the symbol is drawn for that feature,
+    so the values driven by data — a size set with the size assistant, a
+    rotation or a colour read from a field — are applied by QGIS itself. Size is
+    the drawn size in millimetres when the caller has evaluated it, so the
+    canvas is large enough for it.
     """
-    try:
-        size = max(float(symbol.size()), 1.0)
-    except (AttributeError, TypeError, ValueError):
-        size = 5.0
+    if size is None:
+        try:
+            size = float(symbol.size())
+        except (AttributeError, TypeError, ValueError):
+            size = 5.0
+    size = max(size, 1.0)
     extent = int(math.ceil(size * 4 * DOTS_PER_MILLIMETRE))
     buffer, generator = svg_device(extent, extent, extent / 2.0)
     painter = QPainter(generator)
@@ -475,10 +481,17 @@ def marker_fragment(symbol):
         text_format = getattr(context, 'setTextRenderFormat', None)
         if text_format is not None:
             text_format(TEXT_AS_TEXT)
+        if expression_context is not None:
+            context.setExpressionContext(QgsExpressionContext(expression_context))
+            if feature is not None:
+                context.expressionContext().setFeature(feature)
         marker = symbol.clone()
-        marker.startRender(context)
+        if fields is not None:
+            marker.startRender(context, fields)
+        else:
+            marker.startRender(context)
         try:
-            marker.renderPoint(QPointF(0.0, 0.0), None, context)
+            marker.renderPoint(QPointF(0.0, 0.0), feature, context)
         finally:
             marker.stopRender(context)
     finally:

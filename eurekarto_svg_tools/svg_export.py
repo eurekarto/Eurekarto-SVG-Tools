@@ -29,7 +29,8 @@ from qgis.core import (
     QgsProcessingParameterLayout, QgsProcessingParameterLayoutItem,
     QgsProcessingParameterMatrix, QgsProcessingParameterMultipleLayers,
     QgsProcessingParameterNumber, QgsProcessingParameterString,
-    QgsProcessingParameterVectorLayer, QgsRectangle, QgsRenderContext, QgsUnitTypes,
+    QgsProcessingParameterVectorLayer, QgsRectangle, QgsRenderContext, QgsSymbolLayer,
+    QgsUnitTypes,
     QgsVariantUtils, QgsVectorLayer, QgsWkbTypes,
 )
 
@@ -60,6 +61,9 @@ TRANSFORM_SUCCESS = _enum(Qgis, 'GeometryOperationResult', 'Success')
 SYMBOL_FILL = _enum(Qgis, 'SymbolType', 'Fill')
 SYMBOL_LINE = _enum(Qgis, 'SymbolType', 'Line')
 SYMBOL_MARKER = _enum(Qgis, 'SymbolType', 'Marker')
+PROPERTY_SIZE = _enum(QgsSymbolLayer, 'Property', 'Size', QgsSymbolLayer, 'PropertySize')
+PROPERTY_STROKE_WIDTH = _enum(QgsSymbolLayer, 'Property', 'StrokeWidth',
+                              QgsSymbolLayer, 'PropertyStrokeWidth')
 NO_PEN = _enum(Qt, 'PenStyle', 'NoPen')
 NO_BRUSH = _enum(Qt, 'BrushStyle', 'NoBrush')
 WRITE_ONLY = _enum(QIODevice, 'OpenModeFlag', 'WriteOnly')
@@ -792,6 +796,142 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         attributes += self.stroke_attributes(stroke, width)
         return ' '.join(attributes), radius
 
+    # ------------------------------------------------------- data-defined values
+
+    @classmethod
+    def data_defined(cls, symbol):
+        """Every active data-defined property of a symbol and of its levels.
+
+        The size assistant writes its expression here, as does any override set
+        from a data-defined button: a symbol carrying one is not drawn the same
+        for every feature of its class.
+        """
+        found = []
+        owners = ([symbol] + cls.symbol_layers(symbol)) if symbol is not None else []
+        for owner in owners:
+            try:
+                collection = owner.dataDefinedProperties()
+                keys = sorted(collection.propertyKeys())
+            except (AttributeError, TypeError):
+                continue
+            for key in keys:
+                if collection.isActive(key):
+                    found.append(collection.property(key))
+        return found
+
+    @staticmethod
+    def evaluated(properties, expression_context):
+        """The values the properties take for the feature set in the context."""
+        values = []
+        for prop in properties:
+            try:
+                value = prop.value(expression_context)
+            except Exception:
+                value = None
+            if isinstance(value, tuple):
+                value = value[0]
+            values.append(repr(value))
+        return tuple(values)
+
+    @staticmethod
+    def property_number(symbol_layer, key, expression_context, default):
+        """A level's data-defined number for the current feature, or the default."""
+        try:
+            collection = symbol_layer.dataDefinedProperties()
+            if not collection.isActive(key):
+                return default
+            value = collection.property(key).valueAsDouble(expression_context, default)
+        except (AttributeError, TypeError):
+            return default
+        if isinstance(value, tuple):
+            value = value[0] if value[1] else default
+        return default if value is None else float(value)
+
+    def evaluated_size(self, symbol, expression_context):
+        """Marker size in millimetres for the current feature, data-defined size applied.
+
+        None when no level has a size in millimetres, points or pixels. The
+        largest level decides, as it does for the size of the symbol itself.
+        """
+        sizes = []
+        for level in self.symbol_layers(symbol):
+            if self.layer_kind(level) != SYMBOL_MARKER or not hasattr(level, 'size'):
+                continue
+            try:
+                size = self.property_number(level, PROPERTY_SIZE, expression_context,
+                                            float(level.size()))
+                size = self.render_millimetres(size, level.sizeUnit())
+            except (AttributeError, TypeError, ValueError):
+                continue
+            if size is not None:
+                sizes.append(size)
+        return max(sizes) if sizes else None
+
+    def evaluated_width(self, symbol, expression_context):
+        """Width in millimetres of the first line level for the current feature."""
+        for level in self.symbol_layers(symbol):
+            if self.layer_kind(level) != SYMBOL_LINE or not hasattr(level, 'width'):
+                continue
+            if self.pen_is_none(level):
+                return None
+            try:
+                width = self.property_number(level, PROPERTY_STROKE_WIDTH,
+                                             expression_context, float(level.width()))
+                return self.render_millimetres(width, level.widthUnit())
+            except (AttributeError, TypeError, ValueError):
+                return None
+        return None
+
+    def variant_of(self, slot, symbol, feature, geometry_type, fields, render_context,
+                   feedback):
+        """(radius, marker, size) for one feature of a class driven by data.
+
+        The class drawing is what QGIS shows for a symbol as defined. When a value
+        comes from the data — a size from the size assistant above all — the
+        feature is drawn with the value it takes, and features taking the same
+        values share one drawing. Size is the marker size or the line width in
+        millimetres, None when it cannot be told. None when that value hides the
+        feature, as a size of zero does in QGIS.
+        """
+        expression_context = render_context.expressionContext()
+        key = self.evaluated(slot['varying'], expression_context)
+        if key in slot['variants']:
+            return slot['variants'][key]
+        if geometry_type == GEOMETRY_LINE:
+            variant = (slot['radius'], None, self.evaluated_width(symbol, expression_context))
+        else:
+            size = self.evaluated_size(symbol, expression_context)
+            if size is not None and size <= 0:
+                variant = None
+            else:
+                radius = size / 2.0 if size else slot['radius']
+                marker = None
+                if slot['marker'] is not None:
+                    marker = self.marker_of(symbol, geometry_type, slot['label'], feedback,
+                                            (feature, expression_context, fields, size))
+                variant = (radius, marker, size)
+        slot['variants'][key] = variant
+        return variant
+
+    @staticmethod
+    def size_slot(slot, size, geometry_type):
+        """The group of one class holding the features drawn at one size.
+
+        A class whose size comes from the data, through the size assistant
+        above all, gets one group per size, so every size can be selected at
+        once in Illustrator. Line width is carried by the group itself.
+        """
+        if size is None:
+            return slot
+        key = number(size, 2)
+        if key not in slot['sizes']:
+            attributes = ''
+            if geometry_type == GEOMETRY_LINE:
+                attributes = 'stroke-width="{0}"'.format(number(max(size, 0.03), 3))
+            slot['sizes'][key] = {'size': size, 'label': tr('size {0} mm').format(key), 'groups': {},
+                                  'flat': [], 'attributes': attributes}
+        return slot['sizes'][key]
+
     # ---------------------------------------------------------------- layout read
 
     @staticmethod
@@ -1121,24 +1261,25 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         return 'code', code
 
     @staticmethod
-    def marker_of(symbol, geometry_type, label, feedback):
+    def marker_of(symbol, geometry_type, label, feedback, drawing=None):
         """The class marker drawn by QGIS as vectors, or None and a warning.
 
         Rendering asks QGIS for vector output, so a plain marker comes out as
         paths. An effect it cannot compose that way — a blend mode, a shadow —
         still forces an image, and that is worth saying rather than embedding
-        quietly.
+        quietly. Drawing is (feature, expression context, fields, size) when the
+        marker is drawn for one feature; the class has already been warned about.
         """
         if symbol is None or geometry_type != GEOMETRY_POINT:
             return None
         try:
-            fragment = marker_fragment(symbol) or None
+            fragment = marker_fragment(symbol, *(drawing or ())) or None
         except Exception as error:
             feedback.pushWarning(
                 tr('A point symbol could not be drawn, circles are used instead: {0}')
                 .format(error))
             return None
-        if fragment and '<image' in fragment:
+        if fragment and '<image' in fragment and drawing is None:
             feedback.pushWarning(tr(
                 'The symbol of class "{0}" uses an effect QGIS can only draw as an image '
                 '(a blend mode, a shadow, a shapeburst fill): it is embedded as one. '
@@ -1159,6 +1300,9 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
             classes[key] = {'order': order, 'label': label, 'groups': {},
                             'attributes': attributes, 'radius': radius, 'flat': [],
                             'stroke': 'stroke="none"' not in attributes,
+                            'varying': [] if invisible or geometry_type == GEOMETRY_POLYGON
+                            else self.data_defined(symbol),
+                            'variants': {}, 'sizes': {},
                             'marker': None if invisible or feedback is None
                             else self.marker_of(symbol, geometry_type, label, feedback)}
         return classes[key]
@@ -1233,15 +1377,24 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
                     self.hold_for_join(pending, key, geometry, label,
                                        field_text(feature[join_field]).upper())
                     continue
-                pieces, small = writer.pieces(geometry, geometry_type, slot['radius'],
-                                              stats, slot['stroke'], slot['marker'])
+                variant = (slot['radius'], slot['marker'], None)
+                if slot['varying']:
+                    variant = self.variant_of(slot, symbol, feature, geometry_type,
+                                              layer.fields(), render_context, feedback)
+                    if variant is None:
+                        dropped[UNSYMBOLIZED] += 1
+                        continue
+                radius, marker, size = variant
+                pieces, small = writer.pieces(geometry, geometry_type, radius,
+                                              stats, slot['stroke'], marker)
                 if not pieces:
                     dropped[TOO_SMALL if small else INVALID] += 1
                     continue
+                target = self.size_slot(slot, size, geometry_type) if slot['varying'] else slot
                 if name_field:
-                    slot['groups'].setdefault(label or unnamed, []).extend(pieces)
+                    target['groups'].setdefault(label or unnamed, []).extend(pieces)
                 else:
-                    slot['flat'].extend(pieces)
+                    target['flat'].extend(pieces)
             if self.merge_pending(layer, pending, classes, writer, geometry_type,
                                   dropped, stats, unnamed, feedback):
                 canceled = True
@@ -1332,10 +1485,17 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
         return ['<g id="{0}" data-name="{1}"{2}>'.format(identifier, xml_text(label), attributes),
                 '<title>{0}</title>'.format(xml_text(label)), inside, '</g>']
 
+    def slot_content(self, slot, used):
+        """Named groups in name order, then the loose shapes."""
+        body = []
+        for label in sorted(slot['groups'], key=lambda value: (value.casefold(), value)):
+            body += self.named_group(xml_identifier(label, used), label, slot['groups'][label])
+        return body + slot['flat']
+
     def layer_body(self, layer, classes, used, join_field, feedback):
         """SVG for one vector layer: class groups, named groups, loose shapes."""
         ordered = [slot for slot in sorted(classes.values(), key=lambda one: one['order'])
-                   if slot['groups'] or slot['flat']]
+                   if slot['groups'] or slot['flat'] or slot['sizes']]
         if not ordered:
             feedback.pushInfo(
                 tr('Layer "{0}" has nothing inside the frame.').format(layer.name()))
@@ -1349,14 +1509,19 @@ class ExportLayoutSvg(QgsProcessingAlgorithm):
                 body += self.group_element(
                     xml_identifier(slot['label'] or tr('class'), used),
                     slot['label'], slot['attributes'])
-            for label in sorted(slot['groups'], key=lambda value: (value.casefold(), value)):
-                body += self.named_group(xml_identifier(label, used), label,
-                                         slot['groups'][label])
-            body += slot['flat']
+            body += self.slot_content(slot, used)
+            # Largest first, so the small symbols are drawn over the large ones.
+            for sized in sorted(slot['sizes'].values(), key=lambda one: -one['size']):
+                body += self.group_element(xml_identifier(sized['label'], used),
+                                           sized['label'], sized['attributes'])
+                body += self.slot_content(sized, used)
+                body.append('</g>')
             if not single:
                 body.append('</g>')
         body.append('</g>')
-        named = sum(len(slot['groups']) for slot in ordered)
+        named = sum(len(slot['groups']) + sum(len(sized['groups'])
+                                              for sized in slot['sizes'].values())
+                    for slot in ordered)
         grouped = tr(', grouped on {0}').format(join_field) if join_field else ''
         feedback.pushInfo(tr('Layer "{0}": {1} classes, {2} named groups{3}.').format(
             layer.name(), len(ordered), named, grouped))

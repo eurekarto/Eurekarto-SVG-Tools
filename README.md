@@ -1,4 +1,4 @@
-# Eurekarto SVG Tools — 1.6.0
+# Eurekarto SVG Tools — 1.6.1
 
 © 2026 Blanche Lambert / Eurêkarto  
 Créé par Blanche Lambert pour Eurêkarto en 2026.  
@@ -77,7 +77,7 @@ Les légendes visibles sur la page du cadre de carte sont intégrées, chacune s
 
 ## Symboles de points
 
-Le marqueur de chaque classe est dessiné **une fois par QGIS**, dans un générateur SVG, puis copié à l'emplacement de chaque point. Toutes les formes de base (carré, triangle, étoile, croix…) sont donc restituées telles quelles, comme les marqueurs SVG et les marqueurs de police. Les valeurs pilotées par les données — une taille ou une rotation lue dans un champ — ne sont pas appliquées : chaque classe montre son symbole tel qu'il est défini.
+Le marqueur de chaque classe est dessiné **par QGIS**, dans un générateur SVG, puis copié à l'emplacement de chaque point. Toutes les formes de base (carré, triangle, étoile, croix…) sont donc restituées telles quelles, comme les marqueurs SVG et les marqueurs de police. Les valeurs pilotées par les données sont appliquées : une taille réglée avec l'**assistant taille**, une rotation ou une couleur lue dans un champ. Chaque point est alors dessiné par QGIS avec les valeurs qu'il prend, et les points qui prennent les mêmes valeurs partagent le même dessin ; un point dont la taille vaut zéro est écarté, comme QGIS le fait. Pour les lignes, une épaisseur réglée avec l'assistant taille est appliquée aussi. Dans chaque classe, les entités sont alors réunies **par taille**, dans un groupe « taille 2.5 mm » (épaisseur pour les lignes, portée par le groupe). Les groupes sont écrits du plus grand au plus petit : les petits symboles passent au-dessus des gros, et le panneau Calques d'Illustrator les liste de la plus petite taille à la plus grande.
 
 Chaque figuré est écrit comme **un seul groupe**, portant sa position et son style. Qt ouvre un groupe pour ses valeurs par défaut et un autre pour l'état du peintre, et le placement en ajoutait un troisième : un groupe qui ne contient qu'un groupe est fusionné avec lui, attributs combinés et transformations enchaînées, l'intérieur l'emportant sur l'extérieur. Un groupe contenant plusieurs éléments n'est jamais touché, et un fragment mal formé est laissé tel quel.
 
@@ -116,6 +116,7 @@ Le journal d'exécution indique les valeurs de calage lues, le nombre de classes
 
 ## Historique
 
+- **1.6.1** — L'export applique les tailles réglées avec l'assistant taille de QGIS, et plus largement les valeurs pilotées par les données des symboles ponctuels (taille, rotation, couleur) ; l'épaisseur des lignes réglée avec l'assistant est appliquée. Dans chaque classe, un groupe par taille, rangés de la plus petite à la plus grande.
 - **1.6.0** — Étiquettes groupées par couche, un seul groupe par figuré au lieu de trois ou quatre imbriqués. Sortie vectorielle forcée pour les symboles et les légendes : un marqueur portant une opacité ou un effet ressort en tracés au lieu d'une image intégrée.
 - **1.5.0** — Légendes et étiquettes intégrées au SVG, rendues par QGIS lui-même. Les couches à rendu par ensemble de règles sont de nouveau exportées. Une couche « Pas de symbole » donne ses étiquettes, ou des formes sans style si elle porte des groupes nommés.
 - **1.4.0** — La simplification ne déforme plus : elle travaille partie par partie et sa tolérance est plafonnée. Une forme qu'aucune tolérance autorisée ne peut alléger est écrite telle quelle et signalée. Illustrator tronque un tracé trop dense au lieu de le refuser, d'où ce découpage. Chaque polygone rendu par une réparation est écrit, y compris lorsque l'allègement d'un anneau l'a rendu auto-intersectant. Le remplissage suit la règle `nonzero` avec des anneaux orientés explicitement : les trous percent, et deux contours qui se recouvrent s'additionnent au lieu de s'annuler en un trou blanc.
